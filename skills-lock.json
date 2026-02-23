@@ -25,6 +25,16 @@
       "source": "bobmatnyc/claude-mpm-skills",
       "sourceType": "github",
       "computedHash": "c5132317134698624d023cbbbb612b99d2b20f532f6d1417639607cf401f03cd"
+    },
+    "email-and-password-best-practices": {
+      "source": "better-auth/skills",
+      "sourceType": "github",
+      "computedHash": "7380d0bcb68bfa28639bb1b7ca27f3eca1857899b885c66a7004070ec0640e50"
+    },
+    "organization-best-practices": {
+      "source": "better-auth/skills",
+      "sourceType": "github",
+      "computedHash": "dc08ccb8c3a5c468437894aea27731c06ca655553a39b5dffd67d0e429a70c6b"
     }
   }
 }
