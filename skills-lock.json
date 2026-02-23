@@ -11,6 +11,16 @@
       "sourceType": "github",
       "computedHash": "afdf97aa7adae2b9a42389ddb67e7418611bbd3d23604cad96c0f3ca194ab14a"
     },
+    "better-auth-best-practices": {
+      "source": "better-auth/skills",
+      "sourceType": "github",
+      "computedHash": "ae9bd37665a525bdb056ff6f27afc0f9c7c75809e3e23ed85c0d398dd10f6a96"
+    },
+    "create-auth-skill": {
+      "source": "better-auth/skills",
+      "sourceType": "github",
+      "computedHash": "6e6575d1b1d8602bbcecc8d7152ff7622c472fcc71fbc73a35fb9b855b8a161e"
+    },
     "drizzle-orm": {
       "source": "bobmatnyc/claude-mpm-skills",
       "sourceType": "github",
