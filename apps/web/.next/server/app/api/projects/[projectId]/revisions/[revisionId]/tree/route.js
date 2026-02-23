@@ -1,0 +1,13 @@
+var R=require("../../../../../../../chunks/[turbopack]_runtime.js")("server/app/api/projects/[projectId]/revisions/[revisionId]/tree/route.js")
+R.c("server/chunks/[root-of-the-server]__3e86dd16._.js")
+R.c("server/chunks/9d731_next_dist_0d7f011a._.js")
+R.c("server/chunks/b49bc_better-auth_dist_adapters_kysely-adapter_dialect_mjs_f8b01f50._.js")
+R.c("server/chunks/9d731_next_65f53b77._.js")
+R.c("server/chunks/[root-of-the-server]__2f480bbd._.js")
+R.c("server/chunks/_77d96741._.js")
+R.c("server/chunks/node_modules__pnpm_ded9b5c3._.js")
+R.c("server/chunks/d62ff_kysely_dist_esm_859c1fd6._.js")
+R.c("server/chunks/[root-of-the-server]__6fab53e8._.js")
+R.c("server/chunks/3b485_app_api_projects_[projectId]_revisions_[revisionId]_tree_route_actions_d9a53136.js")
+R.m(58518)
+module.exports=R.m(58518).exports

@@ -1,0 +1,39 @@
+{
+  "name": "@ton-audit/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.921.0",
+    "@aws-sdk/lib-storage": "^3.921.0",
+    "@openrouter/ai-sdk-provider": "^2.2.3",
+    "@ton-audit/shared": "workspace:*",
+    "ai": "^6.0.97",
+    "bullmq": "^5.61.2",
+    "cheerio": "^1.1.2",
+    "drizzle-orm": "^0.45.1",
+    "ioredis": "^5.8.1",
+    "pg": "^8.18.0",
+    "playwright": "^1.56.1",
+    "unzipper": "^0.12.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "@types/unzipper": "^0.10.11",
+    "eslint": "^9",
+    "tsx": "^4.20.6",
+    "typescript": "^5",
+    "vitest": "^4.0.8"
+  }
+}

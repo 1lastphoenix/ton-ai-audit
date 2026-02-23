@@ -1,0 +1,64 @@
+import path from "node:path";
+
+import { z } from "zod";
+
+import { DEFAULT_UPLOAD_MAX_FILES } from "@ton-audit/shared";
+
+import type { SandboxFile, SandboxStep } from "./types";
+
+const sandboxFileSchema = z.object({
+  path: z.string().min(1),
+  content: z.string()
+});
+
+const sandboxStepSchema = z.object({
+  name: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+  timeoutMs: z.number().int().positive().max(20 * 60 * 1000).default(60_000),
+  optional: z.boolean().optional()
+});
+
+const sandboxRequestSchema = z.object({
+  files: z.array(sandboxFileSchema).max(DEFAULT_UPLOAD_MAX_FILES, `Max files is ${DEFAULT_UPLOAD_MAX_FILES}`),
+  steps: z.array(sandboxStepSchema)
+});
+
+export type SandboxRequest = {
+  files: SandboxFile[];
+  steps: SandboxStep[];
+};
+
+function isUnsafePath(targetPath: string) {
+  if (!targetPath || targetPath.includes("\0")) {
+    return true;
+  }
+
+  const normalized = targetPath.replace(/\\/g, "/").trim();
+  if (!normalized) {
+    return true;
+  }
+
+  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) {
+    return true;
+  }
+
+  const resolved = path.posix.normalize(normalized);
+  const parts = resolved.split("/");
+  return parts.some((part) => part === "..");
+}
+
+export function validateSandboxRequest(payload: unknown): SandboxRequest {
+  const parsed = sandboxRequestSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
+  }
+
+  for (const file of parsed.data.files) {
+    if (isUnsafePath(file.path)) {
+      throw new Error(`Unsafe sandbox file path detected: ${file.path}`);
+    }
+  }
+
+  return parsed.data;
+}

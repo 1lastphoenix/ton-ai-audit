@@ -1,0 +1,23 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/auth/[...all]/route": "/api/auth/[...all]",
+  "/api/jobs/[jobId]/events/route": "/api/jobs/[jobId]/events",
+  "/api/projects/[projectId]/audits/[auditId]/diff/route": "/api/projects/[projectId]/audits/[auditId]/diff",
+  "/api/projects/[projectId]/audits/[auditId]/pdf/route": "/api/projects/[projectId]/audits/[auditId]/pdf",
+  "/api/projects/[projectId]/audits/[auditId]/route": "/api/projects/[projectId]/audits/[auditId]",
+  "/api/projects/[projectId]/revisions/[revisionId]/file/route": "/api/projects/[projectId]/revisions/[revisionId]/file",
+  "/api/projects/[projectId]/revisions/[revisionId]/tree/route": "/api/projects/[projectId]/revisions/[revisionId]/tree",
+  "/api/projects/[projectId]/revisions/[revisionId]/working-copy/route": "/api/projects/[projectId]/revisions/[revisionId]/working-copy",
+  "/api/projects/[projectId]/revisions/from-upload/route": "/api/projects/[projectId]/revisions/from-upload",
+  "/api/projects/[projectId]/route": "/api/projects/[projectId]",
+  "/api/projects/[projectId]/uploads/complete/route": "/api/projects/[projectId]/uploads/complete",
+  "/api/projects/[projectId]/uploads/init/route": "/api/projects/[projectId]/uploads/init",
+  "/api/projects/[projectId]/working-copies/[workingCopyId]/file/route": "/api/projects/[projectId]/working-copies/[workingCopyId]/file",
+  "/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit/route": "/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit",
+  "/api/projects/route": "/api/projects",
+  "/dashboard/page": "/dashboard",
+  "/favicon.ico/route": "/favicon.ico",
+  "/page": "/",
+  "/projects/[projectId]/page": "/projects/[projectId]"
+}

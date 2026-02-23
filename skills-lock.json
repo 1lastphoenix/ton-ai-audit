@@ -45,6 +45,11 @@
       "source": "timescale/pg-aiguide",
       "sourceType": "github",
       "computedHash": "2253fe81ca558eb2b6bbb1a0e410b3223352ba18b378d29c0dd1a3ab33c62d15"
+    },
+    "turborepo": {
+      "source": "vercel/turborepo",
+      "sourceType": "github",
+      "computedHash": "a28e7480c69fceb5ed1bede35d8d2f80335c31166f3ffc3cbce04163deb3b916"
     }
   }
 }

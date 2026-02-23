@@ -1,0 +1,23 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/[...all]/route": "app/api/auth/[...all]/route.js",
+  "/api/jobs/[jobId]/events/route": "app/api/jobs/[jobId]/events/route.js",
+  "/api/projects/[projectId]/audits/[auditId]/diff/route": "app/api/projects/[projectId]/audits/[auditId]/diff/route.js",
+  "/api/projects/[projectId]/audits/[auditId]/pdf/route": "app/api/projects/[projectId]/audits/[auditId]/pdf/route.js",
+  "/api/projects/[projectId]/audits/[auditId]/route": "app/api/projects/[projectId]/audits/[auditId]/route.js",
+  "/api/projects/[projectId]/revisions/[revisionId]/file/route": "app/api/projects/[projectId]/revisions/[revisionId]/file/route.js",
+  "/api/projects/[projectId]/revisions/[revisionId]/tree/route": "app/api/projects/[projectId]/revisions/[revisionId]/tree/route.js",
+  "/api/projects/[projectId]/revisions/[revisionId]/working-copy/route": "app/api/projects/[projectId]/revisions/[revisionId]/working-copy/route.js",
+  "/api/projects/[projectId]/revisions/from-upload/route": "app/api/projects/[projectId]/revisions/from-upload/route.js",
+  "/api/projects/[projectId]/route": "app/api/projects/[projectId]/route.js",
+  "/api/projects/[projectId]/uploads/complete/route": "app/api/projects/[projectId]/uploads/complete/route.js",
+  "/api/projects/[projectId]/uploads/init/route": "app/api/projects/[projectId]/uploads/init/route.js",
+  "/api/projects/[projectId]/working-copies/[workingCopyId]/file/route": "app/api/projects/[projectId]/working-copies/[workingCopyId]/file/route.js",
+  "/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit/route": "app/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit/route.js",
+  "/api/projects/route": "app/api/projects/route.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/page": "app/page.js",
+  "/projects/[projectId]/page": "app/projects/[projectId]/page.js"
+}

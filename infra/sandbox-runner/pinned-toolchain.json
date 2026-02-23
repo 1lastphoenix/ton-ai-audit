@@ -1,0 +1,7 @@
+{
+  "createTonVersion": "0.31.0",
+  "blueprintVersion": "0.43.0",
+  "tactVersion": "0.1.0",
+  "tonCoreVersion": "0.63.1",
+  "nodeVersion": "20"
+}
