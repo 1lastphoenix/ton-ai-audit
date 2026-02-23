@@ -481,6 +481,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     return "lg:grid-cols-[48px_minmax(0,1fr)]";
   }, [isExplorerVisible, isFindingsVisible]);
+  const treeViewExpandedDirectories = useMemo(() => {
+    if (!explorerQuery.trim()) {
+      return expandedDirectorySet;
+    }
+
+    return new Set(collectDirectoryPaths(filteredTree));
+  }, [expandedDirectorySet, explorerQuery, filteredTree]);
   const problemItems = useMemo(() => {
     const items: string[] = [];
     if (lastError) {
@@ -974,7 +981,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     const handleChange = () => {
       computePrefersDark();
     };
-    mediaQuery.addEventListener("change", handleChange);
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+    } else {
+      mediaQuery.addListener(handleChange);
+    }
 
     const observer = new MutationObserver(() => {
       computePrefersDark();
@@ -985,7 +996,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     });
 
     return () => {
-      mediaQuery.removeEventListener("change", handleChange);
+      if (typeof mediaQuery.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", handleChange);
+      } else {
+        mediaQuery.removeListener(handleChange);
+      }
       observer.disconnect();
     };
   }, []);
@@ -1259,6 +1274,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       return;
     }
 
+    if (auditStatus !== "completed") {
+      const message = "PDF export is available after the audit completes.";
+      setLastError(message);
+      setActivityMessage("Audit is still running. PDF export is unavailable.");
+      pushWorkbenchLog("warn", message);
+      return;
+    }
+
     setIsBusy(true);
     setLastError(null);
     setActivityMessage("Queueing PDF export...");
@@ -1268,7 +1291,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         method: "POST"
       });
       if (!start.ok) {
-        throw new Error("Failed to queue PDF");
+        const startErrorPayload = (await start.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(startErrorPayload?.error ?? "Failed to queue PDF");
       }
       const startPayload = (await start.json()) as { jobId?: string | number };
       if (startPayload.jobId) {
@@ -1282,6 +1308,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         const statusResponse = await fetch(`/api/projects/${projectId}/audits/${auditId}/pdf`, {
           cache: "no-store"
         });
+        if (!statusResponse.ok) {
+          const statusErrorPayload = (await statusResponse.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(statusErrorPayload?.error ?? "Failed to check PDF export status.");
+        }
         const statusPayload = (await statusResponse.json()) as {
           status: string;
           url: string | null;
@@ -1657,7 +1689,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                   nodes={filteredTree}
                   selectedPath={selectedPath}
                   onSelect={openFileInEditor}
-                  expandedDirectories={expandedDirectorySet}
+                  expandedDirectories={treeViewExpandedDirectories}
                   onToggleDirectory={toggleDirectory}
                 />
               ) : (
@@ -1719,7 +1751,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 Run Audit
               </Button>
 
-              <Button size="sm" variant="outline" className="h-7" disabled={!auditId || isBusy} onClick={exportPdf}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7"
+                disabled={!auditId || isBusy || auditStatus !== "completed"}
+                onClick={exportPdf}
+              >
                 <FileDown className="mr-1 size-3" />
                 Export PDF
               </Button>
@@ -1948,48 +1986,55 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           ) : null}
         </section>
 
-        <aside className="bg-muted/20 border-t border-border p-3 lg:border-l lg:border-t-0">
-          <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">Findings</div>
-          <div className="space-y-2">
-            {findings.length === 0 ? (
-              <p className="text-muted-foreground text-xs">No findings on this audit revision.</p>
-            ) : (
-              findings.map((item) => (
-                <Button
-                  key={item.id}
-                  type="button"
-                  variant="ghost"
-                  className="bg-card h-auto w-full justify-start rounded border border-border p-2 text-left text-xs hover:bg-accent/40"
-                  onClick={() => {
-                    const path = item.payloadJson?.evidence?.filePath;
-                    if (path) {
-                      openFileInEditor(path);
-                    }
-                    const line = item.payloadJson?.evidence?.startLine;
-                    if (line && editorRef.current) {
-                      editorRef.current.revealLineInCenter(line);
-                      editorRef.current.setPosition({ lineNumber: line, column: 1 });
-                    }
-                  }}
-                >
-                  <div className="w-full">
-                    <div className={`font-medium ${severityTone(item.payloadJson?.severity ?? item.severity)}`}>
-                      {item.payloadJson?.severity ?? item.severity}
+        {isFindingsVisible ? (
+          <aside className="bg-muted/20 border-t border-border p-3 lg:border-l lg:border-t-0">
+            <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">Findings</div>
+            <div className="space-y-2">
+              {findings.length === 0 ? (
+                <p className="text-muted-foreground text-xs">No findings on this audit revision.</p>
+              ) : (
+                findings.map((item) => (
+                  <Button
+                    key={item.id}
+                    type="button"
+                    variant="ghost"
+                    className="bg-card h-auto w-full justify-start rounded border border-border p-2 text-left text-xs hover:bg-accent/40"
+                    onClick={() => {
+                      const path = item.payloadJson?.evidence?.filePath;
+                      if (path) {
+                        openFileInEditor(path);
+                      }
+                      const line = item.payloadJson?.evidence?.startLine;
+                      if (line && editorRef.current) {
+                        editorRef.current.revealLineInCenter(line);
+                        editorRef.current.setPosition({ lineNumber: line, column: 1 });
+                      }
+                    }}
+                  >
+                    <div className="w-full">
+                      <div className={`font-medium ${severityTone(item.payloadJson?.severity ?? item.severity)}`}>
+                        {item.payloadJson?.severity ?? item.severity}
+                      </div>
+                      <div className="mt-1">{item.payloadJson?.title ?? "Untitled finding"}</div>
+                      <div className="text-muted-foreground mt-1 line-clamp-2">{item.payloadJson?.summary}</div>
                     </div>
-                    <div className="mt-1">{item.payloadJson?.title ?? "Untitled finding"}</div>
-                    <div className="text-muted-foreground mt-1 line-clamp-2">{item.payloadJson?.summary}</div>
-                  </div>
-                </Button>
-              ))
-            )}
-          </div>
-          {lastError ? <p className="text-destructive mt-3 text-xs">{lastError}</p> : null}
-          <p className="text-muted-foreground mt-3 text-xs">Open tabs: {openTabs.length}</p>
-        </aside>
+                  </Button>
+                ))
+              )}
+            </div>
+            {lastError ? <p className="text-destructive mt-3 text-xs">{lastError}</p> : null}
+            <p className="text-muted-foreground mt-3 text-xs">Open tabs: {openTabs.length}</p>
+          </aside>
+        ) : null}
         </div>
 
-        <footer className="bg-[#0f1117] flex h-7 items-center gap-3 border-t border-white/10 px-2 text-[11px]">
-          <span className="text-slate-300">{isEditable ? "Editing" : "Read-only"}</span>
+        <footer className="bg-card/70 flex h-7 items-center gap-3 border-t border-border px-2 text-[11px]">
+          <span className="text-foreground">{isEditable ? "Editing" : "Read-only"}</span>
+          <span className="text-muted-foreground">{selectedPath ? getFileName(selectedPath) : "No file selected"}</span>
+          <span className="text-muted-foreground">
+            Ln {cursorPosition.line}, Col {cursorPosition.column}
+          </span>
+          <span className="text-muted-foreground">{currentFile?.language ?? "plaintext"}</span>
           <span className="text-muted-foreground">audit {auditStatusLabel}</span>
           <span className="text-muted-foreground">LSP {lspStatus}</span>
           <span className="text-muted-foreground">tabs {openTabs.length}</span>

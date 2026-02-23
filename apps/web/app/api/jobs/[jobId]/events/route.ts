@@ -9,6 +9,8 @@ import { db } from "@/lib/server/db";
 import { ensureProjectAccess } from "@/lib/server/domain";
 import { canReadJobEvents } from "@/lib/server/job-events-auth";
 
+const MAX_TRACKED_EVENT_IDS = 512;
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
@@ -45,37 +47,83 @@ export async function GET(
 
     const encoder = new TextEncoder();
     let lastTimestamp = new Date(0);
+    const deliveredEventIds: string[] = [];
+    const deliveredEventIdSet = new Set<string>();
+    let pollingInFlight = false;
+
+    const rememberEventId = (eventId: string) => {
+      if (deliveredEventIdSet.has(eventId)) {
+        return false;
+      }
+
+      deliveredEventIdSet.add(eventId);
+      deliveredEventIds.push(eventId);
+
+      if (deliveredEventIds.length > MAX_TRACKED_EVENT_IDS) {
+        const oldestEventId = deliveredEventIds.shift();
+        if (oldestEventId) {
+          deliveredEventIdSet.delete(oldestEventId);
+        }
+      }
+
+      return true;
+    };
 
     const stream = new ReadableStream({
       async start(controller) {
-        const interval = setInterval(async () => {
-          const events = await db
-            .select()
-            .from(jobEvents)
-            .where(
-              and(
-                eq(jobEvents.jobId, jobId),
-                eq(jobEvents.projectId, projectId),
-                gt(jobEvents.createdAt, lastTimestamp)
-              )
-            )
-            .orderBy(jobEvents.createdAt);
+        let streamClosed = false;
 
-          if (!events.length) {
+        const pollEvents = async () => {
+          if (pollingInFlight || streamClosed) {
             return;
           }
+          pollingInFlight = true;
 
-          lastTimestamp = events[events.length - 1]!.createdAt;
+          try {
+            const events = await db
+              .select()
+              .from(jobEvents)
+              .where(
+                and(
+                  eq(jobEvents.jobId, jobId),
+                  eq(jobEvents.projectId, projectId),
+                  gt(jobEvents.createdAt, lastTimestamp)
+                )
+              )
+              .orderBy(jobEvents.createdAt);
 
-          for (const event of events) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+            if (!events.length) {
+              return;
+            }
+
+            lastTimestamp = events[events.length - 1]!.createdAt;
+
+            for (const event of events) {
+              if (!rememberEventId(event.id)) {
+                continue;
+              }
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+            }
+          } catch {
+            // Keep the stream open and let the next poll retry.
+          } finally {
+            pollingInFlight = false;
           }
+        };
+
+        const interval = setInterval(() => {
+          void pollEvents();
         }, 2_000);
+        void pollEvents();
 
         request.signal.addEventListener("abort", () => {
+          if (streamClosed) {
+            return;
+          }
+          streamClosed = true;
           clearInterval(interval);
           controller.close();
-        });
+        }, { once: true });
       }
     });
 

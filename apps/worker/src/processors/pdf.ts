@@ -90,39 +90,43 @@ export function createPdfProcessor() {
       payload: { data: job.data }
     });
 
-    const auditRun = await db.query.auditRuns.findFirst({
-      where: and(eq(auditRuns.id, job.data.auditRunId), eq(auditRuns.projectId, job.data.projectId))
-    });
-
-    if (!auditRun?.reportJson) {
-      throw new Error("Audit report not found");
-    }
-
-    const findings = await db.query.findingInstances.findMany({
-      where: eq(findingInstances.auditRunId, auditRun.id)
-    });
-
-    const html = renderReportHtml({
-      report: auditRun.reportJson,
-      findings: findings as unknown as Array<Record<string, unknown>>
-    });
-
-    await db
-      .insert(pdfExports)
-      .values({
-        auditRunId: auditRun.id,
-        status: "running"
-      })
-      .onConflictDoUpdate({
-        target: pdfExports.auditRunId,
-        set: {
-          status: "running",
-          updatedAt: new Date()
-        }
-      });
-
     let browser;
     try {
+      const auditRun = await db.query.auditRuns.findFirst({
+        where: and(eq(auditRuns.id, job.data.auditRunId), eq(auditRuns.projectId, job.data.projectId))
+      });
+
+      if (!auditRun) {
+        throw new Error("Audit run not found");
+      }
+
+      await db
+        .insert(pdfExports)
+        .values({
+          auditRunId: auditRun.id,
+          status: "running"
+        })
+        .onConflictDoUpdate({
+          target: pdfExports.auditRunId,
+          set: {
+            status: "running",
+            updatedAt: new Date()
+          }
+        });
+
+      if (!auditRun.reportJson) {
+        throw new Error("Audit report not found");
+      }
+
+      const findings = await db.query.findingInstances.findMany({
+        where: eq(findingInstances.auditRunId, auditRun.id)
+      });
+
+      const html = renderReportHtml({
+        report: auditRun.reportJson,
+        findings: findings as unknown as Array<Record<string, unknown>>
+      });
+
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle" });
@@ -172,7 +176,7 @@ export function createPdfProcessor() {
           status: "failed",
           updatedAt: new Date()
         })
-        .where(eq(pdfExports.auditRunId, auditRun.id));
+        .where(eq(pdfExports.auditRunId, job.data.auditRunId));
 
       throw error;
     } finally {

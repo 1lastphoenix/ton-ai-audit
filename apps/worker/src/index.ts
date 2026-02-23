@@ -19,6 +19,7 @@ import { createDocsCrawlProcessor } from "./processors/docs-crawl";
 import { createDocsIndexProcessor } from "./processors/docs-index";
 import { createFindingLifecycleProcessor } from "./processors/finding-lifecycle";
 import { createIngestProcessor } from "./processors/ingest";
+import { toBullMqJobId } from "./job-id";
 import { createPdfProcessor } from "./processors/pdf";
 import { createVerifyProcessor } from "./processors/verify";
 import { recordJobEvent } from "./job-events";
@@ -45,23 +46,27 @@ async function enqueueJob<Name extends keyof JobPayloadMap>(
   payload: JobPayloadMap[Name],
   jobId: string
 ) {
+  const safeJobId = toBullMqJobId(jobId);
+
   switch (step) {
     case "ingest":
-      return queues.ingest.add(step, payload as JobPayloadMap["ingest"], { jobId });
+      return queues.ingest.add(step, payload as JobPayloadMap["ingest"], { jobId: safeJobId });
     case "verify":
-      return queues.verify.add(step, payload as JobPayloadMap["verify"], { jobId });
+      return queues.verify.add(step, payload as JobPayloadMap["verify"], { jobId: safeJobId });
     case "audit":
-      return queues.audit.add(step, payload as JobPayloadMap["audit"], { jobId });
+      return queues.audit.add(step, payload as JobPayloadMap["audit"], { jobId: safeJobId });
     case "finding-lifecycle":
-      return queues.findingLifecycle.add(step, payload as JobPayloadMap["finding-lifecycle"], { jobId });
+      return queues.findingLifecycle.add(step, payload as JobPayloadMap["finding-lifecycle"], {
+        jobId: safeJobId
+      });
     case "pdf":
-      return queues.pdf.add(step, payload as JobPayloadMap["pdf"], { jobId });
+      return queues.pdf.add(step, payload as JobPayloadMap["pdf"], { jobId: safeJobId });
     case "docs-crawl":
-      return queues.docsCrawl.add(step, payload as JobPayloadMap["docs-crawl"], { jobId });
+      return queues.docsCrawl.add(step, payload as JobPayloadMap["docs-crawl"], { jobId: safeJobId });
     case "docs-index":
-      return queues.docsIndex.add(step, payload as JobPayloadMap["docs-index"], { jobId });
+      return queues.docsIndex.add(step, payload as JobPayloadMap["docs-index"], { jobId: safeJobId });
     case "cleanup":
-      return queues.cleanup.add(step, payload as JobPayloadMap["cleanup"], { jobId });
+      return queues.cleanup.add(step, payload as JobPayloadMap["cleanup"], { jobId: safeJobId });
     default:
       throw new Error(`Unsupported queue step: ${String(step)}`);
   }
@@ -202,7 +207,7 @@ async function bootstrap() {
       dryRun: false
     },
     {
-      jobId: "cleanup:scheduled",
+      jobId: toBullMqJobId("cleanup:scheduled"),
       repeat: {
         every: 24 * 60 * 60 * 1000
       }

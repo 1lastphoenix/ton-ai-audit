@@ -28,6 +28,15 @@ export async function POST(
       return NextResponse.json({ error: "Audit not found" }, { status: 404 });
     }
 
+    if (audit.status !== "completed" || !audit.reportJson) {
+      return NextResponse.json(
+        {
+          error: "Audit report is not ready yet. Wait for a completed audit before exporting PDF."
+        },
+        { status: 409 }
+      );
+    }
+
     await createPdfExport(audit.id);
 
     const job = await enqueueJob(

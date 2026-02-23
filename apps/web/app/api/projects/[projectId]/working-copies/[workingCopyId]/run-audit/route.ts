@@ -7,6 +7,8 @@ import { ensureProjectAccess, snapshotWorkingCopyAndCreateAuditRun } from "@/lib
 import { assertAllowedModel, getAuditModelAllowlist } from "@/lib/server/model-allowlist";
 import { enqueueJob } from "@/lib/server/queues";
 
+const AUDIT_REQUESTABLE_PROJECT_STATES = new Set(["draft", "changes_pending", "ready"]);
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ projectId: string; workingCopyId: string }> }
@@ -18,6 +20,14 @@ export async function POST(
     const project = await ensureProjectAccess(projectId, session.user.id);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (!AUDIT_REQUESTABLE_PROJECT_STATES.has(project.lifecycleState)) {
+      return NextResponse.json(
+        {
+          error: `Audit requests are not allowed while project state is '${project.lifecycleState}'.`
+        },
+        { status: 409 }
+      );
     }
 
     const body = await parseJsonBody(request, runAuditSchema);
