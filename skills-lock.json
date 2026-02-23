@@ -16,6 +16,11 @@
       "sourceType": "github",
       "computedHash": "ae9bd37665a525bdb056ff6f27afc0f9c7c75809e3e23ed85c0d398dd10f6a96"
     },
+    "clean-code": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "78cc52dda1fa19d4a49b71fa4e9733fe91cb370887a5b91b6e8b4781b56c428a"
+    },
     "create-auth-skill": {
       "source": "better-auth/skills",
       "sourceType": "github",
