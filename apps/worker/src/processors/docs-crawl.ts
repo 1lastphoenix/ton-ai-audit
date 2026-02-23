@@ -9,11 +9,12 @@ import {
 
 import { db } from "../db";
 import { recordJobEvent } from "../job-events";
+import { normalizeDocsSourceUrl } from "./docs-sources";
 import type { EnqueueJob } from "./types";
 
 const additionalSources = [
-  "https://github.com/ton-org/blueprint/blob/develop/README.md",
-  "https://github.com/ton-org/create-ton/blob/main/README.md"
+  "https://raw.githubusercontent.com/ton-org/blueprint/develop/README.md",
+  "https://raw.githubusercontent.com/ton-org/create-ton/main/README.md"
 ];
 
 function extractSitemapUrls(xml: string) {
@@ -54,7 +55,7 @@ export function createDocsCrawlProcessor(deps: { enqueueJob: EnqueueJob }) {
       }
     });
 
-    const sourceUrls = [...new Set([...filtered, ...additionalSources])];
+    const sourceUrls = [...new Set([...filtered, ...additionalSources].map(normalizeDocsSourceUrl))];
     let queued = 0;
 
     for (const sourceUrl of sourceUrls) {
@@ -67,7 +68,10 @@ export function createDocsCrawlProcessor(deps: { enqueueJob: EnqueueJob }) {
           .insert(docsSources)
           .values({
             sourceUrl,
-            sourceType: sourceUrl.includes("github.com") ? "github" : "web",
+            sourceType:
+              sourceUrl.includes("github.com") || sourceUrl.includes("raw.githubusercontent.com")
+                ? "github"
+                : "web",
             checksum: "pending",
             title: null
           })

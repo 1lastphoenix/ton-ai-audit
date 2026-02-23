@@ -8,6 +8,8 @@ import { ProjectCreateForm } from "@/components/dashboard/project-create-form";
 import { db } from "@/lib/server/db";
 import { requireServerSession } from "@/lib/server/session";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const session = await requireServerSession();
 

@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ton-audit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ton_audit}
+      POSTGRES_USER: ${POSTGRES_USER:-ton}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ton}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ton} -d ${POSTGRES_DB:-ton_audit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ton-audit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  minio:
+    image: minio/minio:latest
+    container_name: ton-audit-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}; do sleep 1; done;
+      /usr/bin/mc mb --ignore-existing local/${MINIO_BUCKET:-ton-audit};
+      /usr/bin/mc anonymous set none local/${MINIO_BUCKET:-ton-audit};
+      exit 0;
+      "
+
+  sandbox-runner:
+    build:
+      context: ./infra/sandbox-runner
+      dockerfile: Dockerfile
+    container_name: ton-audit-sandbox-runner
+    restart: unless-stopped
+    environment:
+      PORT: ${SANDBOX_PORT:-3003}
+      SANDBOX_EXECUTION_MODE: ${SANDBOX_EXECUTION_MODE:-local}
+      SANDBOX_MAX_TOTAL_BYTES: ${UPLOAD_MAX_BYTES:-26214400}
+      SANDBOX_MAX_REQUEST_BYTES: ${SANDBOX_MAX_REQUEST_BYTES:-31457280}
+      SANDBOX_DOCKER_IMAGE: ${SANDBOX_DOCKER_IMAGE:-ton-audit-sandbox-runner:latest}
+    ports:
+      - "${SANDBOX_PORT:-3003}:3003"
+
+  lsp-service:
+    build:
+      context: ./infra/lsp-service
+      dockerfile: Dockerfile
+    container_name: ton-audit-lsp-service
+    restart: unless-stopped
+    environment:
+      PORT: ${LSP_PORT:-3002}
+      TON_LSP_COMMAND: node
+      TON_LSP_ARGS: /opt/ton-language-server/dist/server.js --stdio
+    ports:
+      - "${LSP_PORT:-3002}:3002"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

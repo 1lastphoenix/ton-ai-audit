@@ -1,4 +1,7 @@
+import { createServer } from "node:http";
+
 import { Queue, Worker, type Job } from "bullmq";
+import { sql } from "drizzle-orm";
 
 import {
   DEFAULT_AUDIT_TIMEOUT_MS,
@@ -8,7 +11,7 @@ import {
   type JobStep
 } from "@ton-audit/shared";
 
-import { pool } from "./db";
+import { db, pool } from "./db";
 import { redisConnection } from "./redis";
 import { createAuditProcessor } from "./processors/audit";
 import { createCleanupProcessor } from "./processors/cleanup";
@@ -117,9 +120,53 @@ const workers = [
   createWorker("cleanup", cleanupProcessor, queueConcurrency.cleanup)
 ];
 
+const healthPort = Number(process.env.WORKER_HEALTH_PORT || 3010);
+const healthServer = createServer(async (req, res) => {
+  if (req.url === "/healthz") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        service: "worker",
+        now: new Date().toISOString()
+      })
+    );
+    return;
+  }
+
+  if (req.url === "/readyz") {
+    try {
+      await db.execute(sql`select 1`);
+      await redisConnection.ping();
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          service: "worker",
+          now: new Date().toISOString()
+        })
+      );
+    } catch (error) {
+      res.writeHead(503, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          service: "worker",
+          error: error instanceof Error ? error.message : "Unknown readiness error"
+        })
+      );
+    }
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error: "Not found" }));
+});
+
 for (const worker of workers) {
   worker.on("completed", async (job, result) => {
     await recordJobEvent({
+      projectId: (job?.data as { projectId?: string } | undefined)?.projectId ?? null,
       queue: worker.name,
       jobId: String(job?.id ?? "unknown"),
       event: "worker-completed",
@@ -129,6 +176,7 @@ for (const worker of workers) {
 
   worker.on("failed", async (job, error) => {
     await recordJobEvent({
+      projectId: (job?.data as { projectId?: string } | undefined)?.projectId ?? null,
       queue: worker.name,
       jobId: String(job?.id ?? "unknown"),
       event: "worker-failed",
@@ -147,9 +195,25 @@ async function bootstrap() {
     },
     "docs-crawl:bootstrap"
   );
+
+  await queues.cleanup.add(
+    "cleanup",
+    {
+      dryRun: false
+    },
+    {
+      jobId: "cleanup:scheduled",
+      repeat: {
+        every: 24 * 60 * 60 * 1000
+      }
+    }
+  );
 }
 
 async function shutdown() {
+  await new Promise<void>((resolve) => {
+    healthServer.close(() => resolve());
+  });
   await Promise.all(workers.map((worker) => worker.close()));
   await Promise.all(Object.values(queues).map((queue) => queue.close()));
   await redisConnection.quit();
@@ -168,6 +232,10 @@ process.on("SIGINT", async () => {
 process.on("SIGTERM", async () => {
   await shutdown();
   process.exit(0);
+});
+
+healthServer.listen(healthPort, () => {
+  console.log(`Worker health server listening on :${healthPort}`);
 });
 
 console.log("TON audit workers started");

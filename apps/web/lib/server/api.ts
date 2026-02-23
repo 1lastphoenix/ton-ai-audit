@@ -49,6 +49,14 @@ export function toApiErrorResponse(error: unknown) {
     return jsonError(error.message, error.statusCode);
   }
 
+  if (
+    error instanceof Error &&
+    "statusCode" in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === "number"
+  ) {
+    return jsonError(error.message, (error as { statusCode: number }).statusCode);
+  }
+
   if (error instanceof Error) {
     return jsonError(error.message, 500);
   }

@@ -45,6 +45,27 @@ describe("shared utils", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("accepts file-set manifest payload", () => {
+    const parsed = uploadInitSchema.safeParse({
+      type: "file-set",
+      files: [
+        {
+          path: "contracts/main.tact",
+          contentType: "text/plain",
+          sizeBytes: 120
+        },
+        {
+          path: "tests/main.spec.ts",
+          contentType: "text/plain",
+          sizeBytes: 240
+        }
+      ],
+      totalSizeBytes: 360
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it("rejects invalid working copy patch payload", () => {
     const parsed = workingCopyPatchFileSchema.safeParse({
       path: "",

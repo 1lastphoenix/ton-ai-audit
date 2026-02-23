@@ -11,10 +11,10 @@ WebSocket bridge for `ton-language-server` (stdio) so Monaco can use full LSP di
 
 - `PORT` default: `3002`
 - `TON_LSP_COMMAND` default: `node`
-- `TON_LSP_ARGS` default: `/opt/ton-language-server/server.js --stdio`
+- `TON_LSP_ARGS` default: `/opt/ton-language-server/dist/server.js --stdio`
 
 ## Notes
 
 - The bridge spawns one language-server process per WebSocket connection.
 - Messages are framed/unframed via standard LSP `Content-Length` protocol.
-- `Dockerfile` clones `ton-blockchain/ton-language-server` and uses its `server.js` entrypoint.
+- `Dockerfile` clones and builds `ton-blockchain/ton-language-server` and uses `dist/server.js`.

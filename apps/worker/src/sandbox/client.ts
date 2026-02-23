@@ -6,7 +6,15 @@ import { env } from "../env";
 import { summarizeSandboxResults } from "./summary";
 
 const sandboxStepResultSchema = z.object({
-  name: z.string(),
+  id: z.string(),
+  action: z.enum([
+    "bootstrap-create-ton",
+    "blueprint-build",
+    "blueprint-test",
+    "tact-check",
+    "func-check",
+    "tolk-check"
+  ]),
   command: z.string(),
   args: z.array(z.string()),
   status: z.enum(["completed", "failed", "skipped", "timeout"]),
@@ -47,7 +55,9 @@ export async function executeSandboxPlan(params: {
       metadata: {
         projectId: params.projectId,
         revisionId: params.revisionId,
-        adapter: params.plan.adapter
+        adapter: params.plan.adapter,
+        bootstrapMode: params.plan.bootstrapMode,
+        seedTemplate: params.plan.seedTemplate
       }
     })
   });

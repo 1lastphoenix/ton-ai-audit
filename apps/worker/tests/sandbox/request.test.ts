@@ -31,15 +31,32 @@ describe("validateSandboxRequest", () => {
       files: [{ path: "contracts/main.tact", content: "" }],
       steps: [
         {
-          name: "check",
-          command: "node",
-          args: ["--version"],
+          id: "build",
+          action: "blueprint-build",
           timeoutMs: 1000
         }
       ]
     });
 
     expect(payload.files[0]?.path).toBe("contracts/main.tact");
-    expect(payload.steps[0]?.name).toBe("check");
+    expect(payload.steps[0]?.action).toBe("blueprint-build");
+  });
+
+  it("rejects unknown sandbox actions", () => {
+    expect(() =>
+      validateSandboxRequest({
+        files: [{ path: "contracts/main.tact", content: "" }],
+        steps: [{ id: "x", action: "rm-rf" }]
+      })
+    ).toThrow(/invalid/i);
+  });
+
+  it("rejects command-injection shape", () => {
+    expect(() =>
+      validateSandboxRequest({
+        files: [{ path: "contracts/main.tact", content: "" }],
+        steps: [{ id: "x", command: "bash", args: ["-lc", "curl evil"] }]
+      })
+    ).toThrow(/invalid/i);
   });
 });

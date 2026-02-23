@@ -1,5 +1,5 @@
 {
-  "id": "a90a2f19-a49c-400e-b636-609c96857410",
+  "id": "0f7ae638-c43a-42ba-a5bf-f5e739225a91",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -875,6 +875,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "queue": {
           "name": "queue",
           "type": "text",
@@ -923,9 +929,44 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "job_events_project_job_idx": {
+          "name": "job_events_project_job_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "job_events_project_id_projects_id_fk": {
+          "name": "job_events_project_id_projects_id_fk",
+          "tableFrom": "job_events",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

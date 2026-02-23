@@ -527,6 +527,7 @@ export const jobEvents = pgTable(
   "job_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
     queue: text("queue").notNull(),
     jobId: text("job_id").notNull(),
     event: text("event").notNull(),
@@ -534,7 +535,8 @@ export const jobEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    jobIdx: index("job_events_job_idx").on(table.jobId)
+    jobIdx: index("job_events_job_idx").on(table.jobId),
+    projectJobIdx: index("job_events_project_job_idx").on(table.projectId, table.jobId)
   })
 );
 

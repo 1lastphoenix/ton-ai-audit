@@ -170,10 +170,34 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
+      "page": "/api/admin/queues/dead-letter",
+      "regex": "^/api/admin/queues/dead\\-letter(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/queues/dead\\-letter(?:/)?$"
+    },
+    {
+      "page": "/api/admin/queues/dead-letter/replay",
+      "regex": "^/api/admin/queues/dead\\-letter/replay(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/queues/dead\\-letter/replay(?:/)?$"
+    },
+    {
+      "page": "/api/healthz",
+      "regex": "^/api/healthz(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/healthz(?:/)?$"
+    },
+    {
       "page": "/api/projects",
       "regex": "^/api/projects(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/projects(?:/)?$"
+    },
+    {
+      "page": "/api/readyz",
+      "regex": "^/api/readyz(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/readyz(?:/)?$"
     },
     {
       "page": "/dashboard",

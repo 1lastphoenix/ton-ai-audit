@@ -4,29 +4,51 @@ import { z } from "zod";
 
 import { DEFAULT_UPLOAD_MAX_FILES } from "@ton-audit/shared";
 
-import type { SandboxFile, SandboxStep } from "./types";
+import type { SandboxFile, SandboxStep, SandboxStepAction } from "./types";
 
 const sandboxFileSchema = z.object({
   path: z.string().min(1),
   content: z.string()
 });
 
-const sandboxStepSchema = z.object({
-  name: z.string().min(1),
-  command: z.string().min(1),
-  args: z.array(z.string()).default([]),
-  timeoutMs: z.number().int().positive().max(20 * 60 * 1000).default(60_000),
-  optional: z.boolean().optional()
-});
+const sandboxStepActionSchema = z.enum([
+  "bootstrap-create-ton",
+  "blueprint-build",
+  "blueprint-test",
+  "tact-check",
+  "func-check",
+  "tolk-check"
+]) satisfies z.ZodType<SandboxStepAction>;
+
+const sandboxStepSchema = z
+  .object({
+    id: z.string().min(1),
+    action: sandboxStepActionSchema,
+    timeoutMs: z.number().int().positive().max(20 * 60 * 1000).default(60_000),
+    optional: z.boolean().optional()
+  })
+  .strict();
+
+const sandboxMetadataSchema = z
+  .object({
+    projectId: z.string().uuid().optional(),
+    revisionId: z.string().uuid().optional(),
+    adapter: z.string().min(1).optional(),
+    bootstrapMode: z.enum(["none", "create-ton"]).optional(),
+    seedTemplate: z.enum(["tact-empty", "tolk-empty", "func-empty"]).nullable().optional()
+  })
+  .strict();
 
 const sandboxRequestSchema = z.object({
   files: z.array(sandboxFileSchema).max(DEFAULT_UPLOAD_MAX_FILES, `Max files is ${DEFAULT_UPLOAD_MAX_FILES}`),
-  steps: z.array(sandboxStepSchema)
+  steps: z.array(sandboxStepSchema),
+  metadata: sandboxMetadataSchema.optional()
 });
 
 export type SandboxRequest = {
   files: SandboxFile[];
   steps: SandboxStep[];
+  metadata?: z.infer<typeof sandboxMetadataSchema>;
 };
 
 function isUnsafePath(targetPath: string) {

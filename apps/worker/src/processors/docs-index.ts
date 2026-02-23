@@ -1,7 +1,6 @@
 import { embedMany } from "ai";
 import { Job } from "bullmq";
 import { eq, sql } from "drizzle-orm";
-import { load } from "cheerio";
 
 import {
   createContentFingerprint,
@@ -14,17 +13,12 @@ import { db } from "../db";
 import { env } from "../env";
 import { recordJobEvent } from "../job-events";
 import { openrouter } from "../openrouter";
+import { normalizeDocsSourceUrl, toIndexableText } from "./docs-sources";
 
 type Chunk = {
   chunkText: string;
   tokenCount: number;
 };
-
-function htmlToText(rawHtml: string) {
-  const $ = load(rawHtml);
-  $("script,style,noscript").remove();
-  return $("body").text().replace(/\s+/g, " ").trim();
-}
 
 function chunkText(input: string, maxChars = 2_500): Chunk[] {
   const chunks: Chunk[] = [];
@@ -64,9 +58,20 @@ export function createDocsIndexProcessor() {
       throw new Error("Docs source not found");
     }
 
-    const response = await fetch(source.sourceUrl);
+    const normalizedSourceUrl = normalizeDocsSourceUrl(source.sourceUrl);
+    if (normalizedSourceUrl !== source.sourceUrl) {
+      await db
+        .update(docsSources)
+        .set({
+          sourceUrl: normalizedSourceUrl,
+          updatedAt: new Date()
+        })
+        .where(eq(docsSources.id, source.id));
+    }
+
+    const response = await fetch(normalizedSourceUrl);
     if (!response.ok) {
-      throw new Error(`Unable to fetch docs source ${source.sourceUrl}`);
+      throw new Error(`Unable to fetch docs source ${normalizedSourceUrl}`);
     }
 
     const body = await response.text();
@@ -87,7 +92,10 @@ export function createDocsIndexProcessor() {
       return { sourceId: source.id, chunks: 0, skipped: true };
     }
 
-    const text = source.sourceType === "github" ? body : htmlToText(body);
+    const text = toIndexableText({
+      sourceType: source.sourceType,
+      body
+    });
     const chunks = chunkText(text);
 
     await db.delete(docsChunks).where(eq(docsChunks.sourceId, source.id));

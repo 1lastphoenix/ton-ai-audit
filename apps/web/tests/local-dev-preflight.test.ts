@@ -1,0 +1,181 @@
+import { describe, expect, it } from "vitest";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const preflight = require("../../../scripts/local-dev-preflight.mjs") as {
+  devServeCommand: string;
+  isAuthFailureError: (message: string) => boolean;
+  getState: (row: Record<string, string | undefined>) => string;
+  getHealth: (row: Record<string, string | undefined>) => string;
+  getServiceName: (row: Record<string, string | undefined>) => string;
+  getBuildEnv: (envObject: Record<string, string>) => Record<string, string>;
+  localComposeServices: string[];
+  shouldStartLocalStack: (
+    rows: Array<Record<string, string | undefined>>,
+    requiredServices?: string[]
+  ) => boolean;
+  findMissingRequiredEnv: (envObject: Record<string, string>) => string[];
+  parseDotEnv: (content: string) => Record<string, string>;
+  requiredEnvKeys: string[];
+};
+
+const {
+  devServeCommand,
+  isAuthFailureError,
+  getHealth,
+  getServiceName,
+  getBuildEnv,
+  getState,
+  shouldStartLocalStack,
+  findMissingRequiredEnv,
+  parseDotEnv,
+  requiredEnvKeys,
+  localComposeServices
+} = preflight;
+
+describe("local dev preflight env helpers", () => {
+  it("parses dotenv-like content and ignores comments", () => {
+    const parsed = parseDotEnv(`
+# comment
+DATABASE_URL=postgresql://ton:ton@localhost:5432/ton_audit
+REDIS_URL=redis://localhost:6379
+MINIO_BUCKET=ton-audit
+`);
+
+    expect(parsed.DATABASE_URL).toBe("postgresql://ton:ton@localhost:5432/ton_audit");
+    expect(parsed.REDIS_URL).toBe("redis://localhost:6379");
+    expect(parsed.MINIO_BUCKET).toBe("ton-audit");
+  });
+
+  it("flags missing and placeholder required env values", () => {
+    const missing = findMissingRequiredEnv({
+      DATABASE_URL: "postgresql://ton:ton@localhost:5432/ton_audit",
+      REDIS_URL: "redis://localhost:6379",
+      MINIO_ENDPOINT: "http://localhost:9000",
+      MINIO_REGION: "us-east-1",
+      MINIO_ACCESS_KEY: "replace-with-minio-access-key",
+      MINIO_SECRET_KEY: "replace-with-minio-secret-key",
+      MINIO_BUCKET: "ton-audit",
+      BETTER_AUTH_SECRET: "replace-with-a-long-random-secret",
+      GITHUB_CLIENT_ID: "",
+      GITHUB_CLIENT_SECRET: "replace-with-github-oauth-client-secret",
+      OPENROUTER_API_KEY: "replace-with-openrouter-api-key",
+      OPENROUTER_EMBEDDINGS_MODEL: "openai/text-embedding-3-small",
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+      NEXT_PUBLIC_TON_LSP_WS_URL: "ws://localhost:3002",
+      POSTGRES_PASSWORD: "replace-with-postgres-password",
+      MINIO_ROOT_USER: "minioadmin",
+      MINIO_ROOT_PASSWORD: "replace-with-minio-root-password"
+    });
+
+    expect(missing).toContain("MINIO_ACCESS_KEY");
+    expect(missing).toContain("MINIO_SECRET_KEY");
+    expect(missing).toContain("BETTER_AUTH_SECRET");
+    expect(missing).toContain("GITHUB_CLIENT_ID");
+    expect(missing).toContain("GITHUB_CLIENT_SECRET");
+    expect(missing).toContain("OPENROUTER_API_KEY");
+    expect(missing).toContain("POSTGRES_PASSWORD");
+    expect(missing).toContain("MINIO_ROOT_PASSWORD");
+    expect(missing).not.toContain("DATABASE_URL");
+  });
+
+  it("keeps required key list stable", () => {
+    expect(requiredEnvKeys).toEqual(
+      expect.arrayContaining([
+        "DATABASE_URL",
+        "REDIS_URL",
+        "MINIO_ENDPOINT",
+        "MINIO_ACCESS_KEY",
+        "MINIO_SECRET_KEY",
+        "MINIO_BUCKET",
+        "BETTER_AUTH_SECRET",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_EMBEDDINGS_MODEL",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_TON_LSP_WS_URL",
+        "POSTGRES_PASSWORD",
+        "MINIO_ROOT_USER",
+        "MINIO_ROOT_PASSWORD"
+      ])
+    );
+  });
+
+  it("keeps local compose stack infra-only", () => {
+    expect(localComposeServices).toEqual(
+      expect.arrayContaining([
+        "postgres",
+        "redis",
+        "minio",
+        "sandbox-runner",
+        "lsp-service"
+      ])
+    );
+    expect(localComposeServices).not.toContain("web");
+    expect(localComposeServices).not.toContain("worker");
+  });
+
+  it("forces NODE_ENV=production for build commands", () => {
+    const buildEnv = getBuildEnv({
+      NODE_ENV: "local",
+      DATABASE_URL: "postgresql://ton:ton@localhost:5432/ton_audit"
+    });
+
+    expect(buildEnv.NODE_ENV).toBe("production");
+    expect(buildEnv.DATABASE_URL).toBe("postgresql://ton:ton@localhost:5432/ton_audit");
+  });
+
+  it("keeps a single command to launch web and worker dev servers", () => {
+    expect(devServeCommand).toContain("pnpm");
+    expect(devServeCommand).toContain("@ton-audit/web");
+    expect(devServeCommand).toContain("@ton-audit/worker");
+  });
+
+  it("skips compose up when all required services are running and healthy", () => {
+    const result = shouldStartLocalStack(
+      [
+        { Service: "postgres", State: "running", Health: "healthy" },
+        { Service: "redis", State: "running" },
+        { Service: "minio", State: "running" },
+        { Service: "sandbox-runner", State: "running", Health: "healthy" },
+        { Service: "lsp-service", State: "running", Health: "healthy" },
+        { Service: "web", State: "running" },
+        { Service: "worker", State: "running", Health: "healthy" }
+      ],
+      ["postgres", "redis", "minio", "sandbox-runner", "lsp-service", "web", "worker"]
+    );
+
+    expect(result).toBe(false);
+  });
+
+  it("runs compose up when any required service is missing or unhealthy", () => {
+    expect(
+      shouldStartLocalStack(
+        [
+          { Service: "postgres", State: "running", Health: "healthy" },
+          { Service: "redis", State: "running" },
+          { Service: "minio", State: "running" },
+          { Service: "sandbox-runner", State: "running", Health: "unhealthy" },
+          { Service: "lsp-service", State: "running", Health: "healthy" },
+          { Service: "web", State: "running" }
+        ],
+        ["postgres", "redis", "minio", "sandbox-runner", "lsp-service", "web", "worker"]
+      )
+    ).toBe(true);
+
+    expect(shouldStartLocalStack([], ["postgres"])).toBe(true);
+  });
+
+  it("detects postgres auth failure signatures", () => {
+    expect(isAuthFailureError("password authentication failed for user \"ton\"")).toBe(true);
+    expect(isAuthFailureError("code: '28P01'")).toBe(true);
+    expect(isAuthFailureError("connection timeout")).toBe(false);
+  });
+
+  it("normalizes compose row fields for state and health", () => {
+    expect(getServiceName({ service: "postgres" })).toBe("postgres");
+    expect(getState({ Status: "Up 8 seconds" })).toBe("running");
+    expect(getHealth({ health: "healthy" })).toBe("healthy");
+  });
+});

@@ -1,20 +1,25 @@
 import { detectLanguageFromPath, normalizePath } from "@ton-audit/shared";
 
-import type { SandboxFile, SandboxPlan, SandboxStep } from "./types";
+import type {
+  SandboxFile,
+  SandboxPlan,
+  SandboxStep,
+  SandboxStepAction
+} from "./types";
 
-const DEFAULT_STEP_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_BUILD_TIMEOUT_MS = 8 * 60 * 1000;
+const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 3 * 60 * 1000;
 
 function createStep(
-  name: string,
-  command: string,
-  args: string[],
+  id: string,
+  action: SandboxStepAction,
   optional = false,
-  timeoutMs = DEFAULT_STEP_TIMEOUT_MS
+  timeoutMs =
+    action === "bootstrap-create-ton" ? DEFAULT_BOOTSTRAP_TIMEOUT_MS : DEFAULT_BUILD_TIMEOUT_MS
 ): SandboxStep {
   return {
-    name,
-    command,
-    args,
+    id,
+    action,
     optional,
     timeoutMs
   };
@@ -64,36 +69,95 @@ function languageSet(files: SandboxFile[]) {
   return [...languages];
 }
 
+const templatePriority: Array<"tact" | "tolk" | "func"> = ["tact", "tolk", "func"];
+
+function pickSeedTemplate(files: SandboxFile[], languages: string[]): "tact-empty" | "tolk-empty" | "func-empty" {
+  const counts = {
+    tact: 0,
+    tolk: 0,
+    func: 0
+  };
+
+  for (const file of files) {
+    const language = detectLanguageFromPath(file.path);
+    if (language === "tact" || language === "tolk" || language === "func") {
+      counts[language] += 1;
+    }
+  }
+
+  let selected: "tact" | "tolk" | "func" = "tact";
+  let maxCount = -1;
+  for (const candidate of templatePriority) {
+    if ((counts[candidate] ?? 0) > maxCount) {
+      selected = candidate;
+      maxCount = counts[candidate];
+    }
+  }
+
+  if (!languages.includes(selected) && languages.includes("tolk")) {
+    selected = "tolk";
+  } else if (!languages.includes(selected) && languages.includes("func")) {
+    selected = "func";
+  }
+
+  if (selected === "tolk") {
+    return "tolk-empty";
+  }
+
+  if (selected === "func") {
+    return "func-empty";
+  }
+
+  return "tact-empty";
+}
+
 function blueprintPlan(languages: string[]): SandboxPlan {
   return {
     adapter: "blueprint",
     languages,
     reason: "Detected Blueprint project files.",
+    bootstrapMode: "none",
+    seedTemplate: null,
+    unsupportedReasons: [],
     steps: [
-      createStep("blueprint-install", "npm", ["install", "--ignore-scripts"], true),
-      createStep("blueprint-build", "npx", ["blueprint", "build"], false),
-      createStep("blueprint-test", "npx", ["blueprint", "test"], true)
+      createStep("blueprint-build", "blueprint-build", false),
+      createStep("blueprint-test", "blueprint-test", true)
     ]
   };
 }
 
-function singleLanguagePlan(language: string): SandboxPlan {
+function singleLanguagePlan(language: string, files: SandboxFile[]): SandboxPlan {
+  const seedTemplate = pickSeedTemplate(files, [language]);
+
   switch (language) {
     case "tact":
       return {
         adapter: "tact",
         languages: [language],
         reason: "Detected Tact contract files.",
-        steps: [createStep("tact-compile", "npx", ["blueprint", "build"], true)]
+        bootstrapMode: "create-ton",
+        seedTemplate,
+        unsupportedReasons: [],
+        steps: [
+          createStep("bootstrap", "bootstrap-create-ton", false),
+          createStep("tact-check", "tact-check", true),
+          createStep("blueprint-build", "blueprint-build", false),
+          createStep("blueprint-test", "blueprint-test", true)
+        ]
       };
     case "func":
       return {
         adapter: "func",
         languages: [language],
         reason: "Detected FunC contract files.",
+        bootstrapMode: "create-ton",
+        seedTemplate,
+        unsupportedReasons: [],
         steps: [
-          createStep("func-toolchain-check", "func", ["-v"], true),
-          createStep("func-blueprint-build", "npx", ["blueprint", "build"], true)
+          createStep("bootstrap", "bootstrap-create-ton", false),
+          createStep("func-check", "func-check", true),
+          createStep("blueprint-build", "blueprint-build", true),
+          createStep("blueprint-test", "blueprint-test", true)
         ]
       };
     case "tolk":
@@ -101,9 +165,14 @@ function singleLanguagePlan(language: string): SandboxPlan {
         adapter: "tolk",
         languages: [language],
         reason: "Detected Tolk contract files.",
+        bootstrapMode: "create-ton",
+        seedTemplate,
+        unsupportedReasons: [],
         steps: [
-          createStep("tolk-toolchain-check", "tolk", ["--help"], true),
-          createStep("tolk-blueprint-build", "npx", ["blueprint", "build"], true)
+          createStep("bootstrap", "bootstrap-create-ton", false),
+          createStep("tolk-check", "tolk-check", true),
+          createStep("blueprint-build", "blueprint-build", true),
+          createStep("blueprint-test", "blueprint-test", true)
         ]
       };
     default:
@@ -111,27 +180,40 @@ function singleLanguagePlan(language: string): SandboxPlan {
         adapter: "none",
         languages: [language],
         reason: "Language not supported by sandbox adapter.",
+        bootstrapMode: "none",
+        seedTemplate: null,
+        unsupportedReasons: [`Language '${language}' is not executable in sandbox v1.`],
         steps: []
       };
   }
 }
 
-function mixedPlan(languages: string[]): SandboxPlan {
+function mixedPlan(files: SandboxFile[], languages: string[]): SandboxPlan {
   const steps: SandboxStep[] = [];
+  const unsupportedReasons: string[] = [
+    "Mixed-language execution runs with pinned toolchain only; project-specific dependencies are skipped."
+  ];
+
+  steps.push(createStep("bootstrap", "bootstrap-create-ton", false));
   if (languages.includes("tact")) {
-    steps.push(createStep("mixed-tact-build", "npx", ["blueprint", "build"], true));
+    steps.push(createStep("tact-check", "tact-check", true));
   }
   if (languages.includes("func")) {
-    steps.push(createStep("mixed-func-check", "func", ["-v"], true));
+    steps.push(createStep("func-check", "func-check", true));
   }
   if (languages.includes("tolk")) {
-    steps.push(createStep("mixed-tolk-check", "tolk", ["--help"], true));
+    steps.push(createStep("tolk-check", "tolk-check", true));
   }
+  steps.push(createStep("blueprint-build", "blueprint-build", true));
+  steps.push(createStep("blueprint-test", "blueprint-test", true));
 
   return {
     adapter: "mixed",
     languages,
     reason: "Detected mixed TON language set without Blueprint metadata.",
+    bootstrapMode: "create-ton",
+    seedTemplate: pickSeedTemplate(files, languages),
+    unsupportedReasons,
     steps
   };
 }
@@ -148,6 +230,9 @@ export function planSandboxVerification(files: SandboxFile[]): SandboxPlan {
       adapter: "none",
       languages: [],
       reason: "No supported TON contract files were detected.",
+      bootstrapMode: "none",
+      seedTemplate: null,
+      unsupportedReasons: ["No executable TON source files were found."],
       steps: []
     };
   }
@@ -157,8 +242,8 @@ export function planSandboxVerification(files: SandboxFile[]): SandboxPlan {
   }
 
   if (languages.length === 1) {
-    return singleLanguagePlan(languages[0]!);
+    return singleLanguagePlan(languages[0]!, normalized);
   }
 
-  return mixedPlan(languages);
+  return mixedPlan(normalized, languages);
 }

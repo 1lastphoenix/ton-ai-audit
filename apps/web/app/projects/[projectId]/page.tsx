@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 
 import { ProjectWorkspace } from "@/components/projects/project-workspace";
 import { ensureProjectAccess, getLatestProjectState } from "@/lib/server/domain";
-import { env } from "@/lib/server/env";
+import { getAuditModelAllowlist } from "@/lib/server/model-allowlist";
 import { requireServerSession } from "@/lib/server/session";
+
+export const dynamic = "force-dynamic";
 
 export default async function ProjectPage(props: {
   params: Promise<{ projectId: string }>;
@@ -18,6 +20,7 @@ export default async function ProjectPage(props: {
   }
 
   const latest = await getLatestProjectState(project.id);
+  const modelAllowlist = await getAuditModelAllowlist();
 
   return (
     <main className="min-h-screen bg-[#0b0f15] text-zinc-100">
@@ -36,7 +39,7 @@ export default async function ProjectPage(props: {
           projectId={project.id}
           initialRevisionId={latest.latestRevision?.id ?? null}
           initialAuditId={latest.latestAudit?.id ?? null}
-          modelAllowlist={env.AUDIT_MODEL_ALLOWLIST}
+          modelAllowlist={modelAllowlist}
         />
       </div>
     </main>

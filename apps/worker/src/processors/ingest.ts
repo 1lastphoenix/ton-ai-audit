@@ -5,10 +5,12 @@ import unzipper from "unzipper";
 import { and, eq } from "drizzle-orm";
 
 import {
+  acceptedUploadExtensions,
   auditRuns,
   detectLanguageFromPath,
   normalizePath,
   revisions,
+  systemSettings,
   type JobPayloadMap,
   uploads
 } from "@ton-audit/shared";
@@ -25,6 +27,13 @@ type ArchiveFile = {
   path: string;
   sizeBytes: number;
   content: string;
+};
+
+type UploadManifestEntry = {
+  path: string;
+  s3Key: string;
+  sizeBytes: number;
+  contentType: string;
 };
 
 async function loadArchiveFiles(buffer: Buffer): Promise<ArchiveFile[]> {
@@ -64,6 +73,10 @@ function buildSingleUploadFile(params: {
 }): ArchiveFile {
   const normalizedPath = normalizePath(params.originalFilename);
   const filename = normalizedPath || path.basename(params.originalFilename) || "uploaded.txt";
+  const extension = path.extname(filename).toLowerCase();
+  if (!acceptedUploadExtensions.includes(extension as (typeof acceptedUploadExtensions)[number])) {
+    throw new Error(`Unsupported file extension for ${filename}`);
+  }
 
   return {
     path: filename,
@@ -72,9 +85,48 @@ function buildSingleUploadFile(params: {
   };
 }
 
+async function loadFileSetFiles(manifest: UploadManifestEntry[]) {
+  const files: ArchiveFile[] = [];
+  for (const file of manifest) {
+    const normalizedPath = normalizePath(file.path);
+    const extension = path.extname(normalizedPath).toLowerCase();
+    if (!acceptedUploadExtensions.includes(extension as (typeof acceptedUploadExtensions)[number])) {
+      continue;
+    }
+
+    const contentBuffer = await getObjectBuffer(file.s3Key);
+    if (!contentBuffer) {
+      throw new Error(`Missing uploaded object for ${normalizedPath}`);
+    }
+
+    files.push({
+      path: normalizedPath,
+      sizeBytes: contentBuffer.byteLength,
+      content: contentBuffer.toString("utf8")
+    });
+  }
+
+  return files;
+}
+
+async function loadAuditModelAllowlist() {
+  const setting = await db.query.systemSettings.findFirst({
+    where: eq(systemSettings.key, "audit_model_allowlist")
+  });
+
+  const fromSetting = Array.isArray((setting?.value as { models?: unknown[] } | null)?.models)
+    ? ((setting?.value as { models: unknown[] }).models ?? [])
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+    : [];
+
+  return fromSetting.length ? fromSetting : env.AUDIT_MODEL_ALLOWLIST;
+}
+
 export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
   return async function ingest(job: Job<JobPayloadMap["ingest"]>) {
     await recordJobEvent({
+      projectId: job.data.projectId,
       queue: "ingest",
       jobId: String(job.id),
       event: "started",
@@ -111,7 +163,13 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
       const files =
         upload.type === "zip"
           ? await loadArchiveFiles(payloadBuffer)
-          : [buildSingleUploadFile({ originalFilename: upload.originalFilename, content: payloadBuffer })];
+          : upload.type === "file-set"
+            ? await loadFileSetFiles(
+                Array.isArray((upload.metadata as { files?: unknown[] } | null)?.files)
+                  ? ((upload.metadata as { files: UploadManifestEntry[] }).files ?? [])
+                  : []
+              )
+            : [buildSingleUploadFile({ originalFilename: upload.originalFilename, content: payloadBuffer })];
 
       if (!files.length) {
         throw new Error("No supported source files found in upload");
@@ -135,6 +193,7 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
       });
 
       if (!auditRun) {
+        const modelAllowlist = await loadAuditModelAllowlist();
         const [created] = await db
           .insert(auditRuns)
           .values({
@@ -142,10 +201,10 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
             revisionId: revision.id,
             status: "queued",
             requestedByUserId: job.data.requestedByUserId,
-            primaryModelId: env.AUDIT_MODEL_ALLOWLIST[0] ?? "openai/gpt-5",
+            primaryModelId: modelAllowlist[0] ?? "openai/gpt-5",
             fallbackModelId:
-              env.AUDIT_MODEL_ALLOWLIST[1] ??
-              env.AUDIT_MODEL_ALLOWLIST[0] ??
+              modelAllowlist[1] ??
+              modelAllowlist[0] ??
               "openai/gpt-5-mini"
           })
           .returning();
@@ -177,6 +236,7 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
       );
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "ingest",
         jobId: String(job.id),
         event: "completed",
@@ -198,6 +258,7 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         .where(eq(uploads.id, upload.id));
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "ingest",
         jobId: String(job.id),
         event: "failed",

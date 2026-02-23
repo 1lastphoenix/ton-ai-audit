@@ -16,6 +16,7 @@ import { computeFindingTransitions } from "./finding-lifecycle-core";
 export function createFindingLifecycleProcessor() {
   return async function findingLifecycle(job: Job<JobPayloadMap["finding-lifecycle"]>) {
     await recordJobEvent({
+      projectId: job.data.projectId,
       queue: "finding-lifecycle",
       jobId: String(job.id),
       event: "started",
@@ -101,6 +102,7 @@ export function createFindingLifecycleProcessor() {
     }
 
     await recordJobEvent({
+      projectId: job.data.projectId,
       queue: "finding-lifecycle",
       jobId: String(job.id),
       event: "completed",

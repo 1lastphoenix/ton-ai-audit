@@ -14,10 +14,11 @@ type UploadInitResponse = {
   uploadId: string;
   singleUrl: string | null;
   partUrls: Array<{ partNumber: number; url: string }>;
+  fileUrls?: Array<{ path: string; key: string; url: string }>;
 };
 
 export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormProps) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,33 +31,53 @@ export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormPr
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input
           type="file"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          multiple
+          onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
           accept=".zip,.tolk,.fc,.func,.tact,.fift,.fif,.tlb,.ts,.js,.json,.md"
         />
         <Button
-          disabled={!file || isUploading}
+          disabled={files.length === 0 || isUploading}
           onClick={async () => {
-            if (!file) {
+            if (files.length === 0) {
               return;
             }
 
             setError(null);
             setIsUploading(true);
             try {
-              const isZip = file.name.toLowerCase().endsWith(".zip");
+              const selectedFiles = files;
+              const zipFiles = selectedFiles.filter((file) => file.name.toLowerCase().endsWith(".zip"));
+              const isZip = selectedFiles.length === 1 && zipFiles.length === 1;
+
+              if (!isZip && zipFiles.length > 0) {
+                throw new Error("ZIP uploads cannot be combined with separate files.");
+              }
+
+              const totalSizeBytes = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+              const requestBody = isZip
+                ? {
+                    filename: selectedFiles[0]!.name,
+                    contentType: selectedFiles[0]!.type || "application/octet-stream",
+                    sizeBytes: selectedFiles[0]!.size,
+                    type: "zip" as const,
+                    parts: 1
+                  }
+                : {
+                    type: "file-set" as const,
+                    files: selectedFiles.map((file) => ({
+                      path: file.webkitRelativePath || file.name,
+                      contentType: file.type || "application/octet-stream",
+                      sizeBytes: file.size
+                    })),
+                    totalSizeBytes
+                  };
 
               const initResponse = await fetch(`/api/projects/${projectId}/uploads/init`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json"
                 },
-                body: JSON.stringify({
-                  filename: file.name,
-                  contentType: file.type || "application/octet-stream",
-                  sizeBytes: file.size,
-                  type: isZip ? "zip" : "file-set",
-                  parts: 1
-                })
+                body: JSON.stringify(requestBody)
               });
 
               if (!initResponse.ok) {
@@ -65,20 +86,51 @@ export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormPr
               }
 
               const initPayload = (await initResponse.json()) as UploadInitResponse;
-              if (!initPayload.singleUrl) {
-                throw new Error("Multipart upload not supported by this form");
-              }
+              const completedFiles: Array<{ path: string }> = [];
 
-              const uploadResponse = await fetch(initPayload.singleUrl, {
-                method: "PUT",
-                body: file,
-                headers: {
-                  "Content-Type": file.type || "application/octet-stream"
+              if (isZip) {
+                if (!initPayload.singleUrl) {
+                  throw new Error("Multipart upload not supported by this form");
                 }
-              });
 
-              if (!uploadResponse.ok) {
-                throw new Error(`Upload failed with status ${uploadResponse.status}`);
+                const zipFile = selectedFiles[0]!;
+                const uploadResponse = await fetch(initPayload.singleUrl, {
+                  method: "PUT",
+                  body: zipFile,
+                  headers: {
+                    "Content-Type": zipFile.type || "application/octet-stream"
+                  }
+                });
+
+                if (!uploadResponse.ok) {
+                  throw new Error(`Upload failed with status ${uploadResponse.status}`);
+                }
+              } else {
+                if (!initPayload.fileUrls?.length) {
+                  throw new Error("File-set upload URLs were not returned");
+                }
+
+                const uploadUrlByPath = new Map(initPayload.fileUrls.map((entry) => [entry.path, entry.url]));
+                for (const selectedFile of selectedFiles) {
+                  const uploadPath = selectedFile.webkitRelativePath || selectedFile.name;
+                  const uploadUrl = uploadUrlByPath.get(uploadPath);
+                  if (!uploadUrl) {
+                    throw new Error(`Upload URL missing for ${uploadPath}`);
+                  }
+
+                  const uploadResponse = await fetch(uploadUrl, {
+                    method: "PUT",
+                    body: selectedFile,
+                    headers: {
+                      "Content-Type": selectedFile.type || "application/octet-stream"
+                    }
+                  });
+                  if (!uploadResponse.ok) {
+                    throw new Error(`Upload failed with status ${uploadResponse.status} (${uploadPath})`);
+                  }
+
+                  completedFiles.push({ path: uploadPath });
+                }
               }
 
               const completeResponse = await fetch(`/api/projects/${projectId}/uploads/complete`, {
@@ -88,7 +140,8 @@ export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormPr
                 },
                 body: JSON.stringify({
                   uploadId: initPayload.uploadId,
-                  eTags: []
+                  eTags: [],
+                  completedFiles
                 })
               });
 
@@ -124,7 +177,7 @@ export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormPr
                 revisionId: revisionPayload.revision.id,
                 jobId: revisionPayload.jobId
               });
-              setFile(null);
+              setFiles([]);
             } catch (uploadError) {
               setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
             } finally {

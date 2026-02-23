@@ -206,6 +206,9 @@ importers:
       playwright:
         specifier: ^1.56.1
         version: 1.58.2
+      tsx:
+        specifier: ^4.20.6
+        version: 4.21.0
       unzipper:
         specifier: ^0.12.3
         version: 0.12.3
@@ -231,9 +234,6 @@ importers:
       eslint:
         specifier: ^9
         version: 9.39.2(jiti@2.6.1)
-      tsx:
-        specifier: ^4.20.6
-        version: 4.21.0
       typescript:
         specifier: ^5
         version: 5.9.3

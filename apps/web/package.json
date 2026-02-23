@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node ../../scripts/run-with-root-env.mjs -- next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

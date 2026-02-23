@@ -7,6 +7,8 @@
     "dev": "pnpm --filter @ton-audit/web dev",
     "dev:web": "pnpm --filter @ton-audit/web dev",
     "dev:worker": "pnpm --filter @ton-audit/worker dev",
+    "dev:test:all": "node scripts/local-dev-preflight.mjs --serve",
+    "dev:test:check": "node scripts/local-dev-preflight.mjs",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

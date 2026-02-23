@@ -87,22 +87,46 @@ export const createProjectSchema = z.object({
   slug: z.string().regex(/^[a-z0-9-]+$/)
 });
 
-export const uploadInitSchema = z.object({
+const uploadInitSingleFileSchema = z.object({
+  type: z.literal("zip"),
   filename: z.string().min(1),
   contentType: z.string().min(1),
   sizeBytes: z.number().int().positive(),
-  type: uploadTypeSchema,
   parts: z.number().int().positive().max(10_000).default(1)
 });
 
+const uploadInitFileSetFileSchema = z.object({
+  path: z.string().min(1),
+  contentType: z.string().min(1),
+  sizeBytes: z.number().int().positive()
+});
+
+const uploadInitFileSetSchema = z.object({
+  type: z.literal("file-set"),
+  files: z.array(uploadInitFileSetFileSchema).min(1).max(DEFAULT_UPLOAD_MAX_FILES),
+  totalSizeBytes: z.number().int().positive()
+});
+
+export const uploadInitSchema = z.union([uploadInitSingleFileSchema, uploadInitFileSetSchema]);
+
 export const uploadCompleteSchema = z.object({
   uploadId: z.string().uuid(),
-  eTags: z.array(
-    z.object({
-      partNumber: z.number().int().positive(),
-      eTag: z.string().min(1)
-    })
-  )
+  eTags: z
+    .array(
+      z.object({
+        partNumber: z.number().int().positive(),
+        eTag: z.string().min(1)
+      })
+    )
+    .default([]),
+  completedFiles: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        eTag: z.string().min(1).optional()
+      })
+    )
+    .default([])
 });
 
 export const createRevisionFromUploadSchema = z.object({

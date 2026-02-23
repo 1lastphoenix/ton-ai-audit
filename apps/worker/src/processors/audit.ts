@@ -1,4 +1,4 @@
-import { generateObject } from "ai";
+import { embed, generateObject } from "ai";
 import { Job } from "bullmq";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -17,6 +17,7 @@ import {
 } from "@ton-audit/shared";
 
 import { db } from "../db";
+import { env } from "../env";
 import { recordJobEvent } from "../job-events";
 import { openrouter } from "../openrouter";
 import { loadRevisionFilesWithContent } from "../revision-files";
@@ -65,8 +66,46 @@ async function retrieveDocChunks(query: string): Promise<RetrievedDocChunk[]> {
     }))
     .filter((row) => row.chunkId && row.sourceUrl && row.chunkText);
 
-  if (lexicalChunks.length >= 5) {
-    return lexicalChunks;
+  let semanticChunks: RetrievedDocChunk[] = [];
+  try {
+    const { embedding } = await embed({
+      model: openrouter.textEmbeddingModel(env.OPENROUTER_EMBEDDINGS_MODEL),
+      value: queryTerms.slice(0, 2_500)
+    });
+
+    const vectorLiteral = `[${embedding.join(",")}]`;
+    const semanticRows = await db.execute(sql`
+      SELECT dc.id::text as chunk_id, ds.source_url, dc.chunk_text
+      FROM docs_chunks dc
+      INNER JOIN docs_sources ds ON ds.id = dc.source_id
+      ORDER BY dc.embedding <=> ${vectorLiteral}::vector
+      LIMIT 8
+    `);
+
+    semanticChunks = (semanticRows as unknown as { rows: Array<Record<string, unknown>> }).rows
+      .map((row) => ({
+        chunkId: String(row.chunk_id),
+        sourceUrl: String(row.source_url),
+        chunkText: String(row.chunk_text)
+      }))
+      .filter((row) => row.chunkId && row.sourceUrl && row.chunkText);
+  } catch {
+    semanticChunks = [];
+  }
+
+  const mergedById = new Map<string, RetrievedDocChunk>();
+  for (const chunk of lexicalChunks) {
+    mergedById.set(chunk.chunkId, chunk);
+  }
+  for (const chunk of semanticChunks) {
+    if (!mergedById.has(chunk.chunkId)) {
+      mergedById.set(chunk.chunkId, chunk);
+    }
+  }
+
+  const merged = [...mergedById.values()].slice(0, 8);
+  if (merged.length >= 5) {
+    return merged;
   }
 
   const fallbackRows = await db
@@ -86,7 +125,15 @@ async function retrieveDocChunks(query: string): Promise<RetrievedDocChunk[]> {
     chunkText: row.chunkText
   }));
 
-  return [...lexicalChunks, ...fallbackChunks].slice(0, 8);
+  const withFallback = [...merged, ...fallbackChunks];
+  const deduped = new Map<string, RetrievedDocChunk>();
+  for (const chunk of withFallback) {
+    if (!deduped.has(chunk.chunkId)) {
+      deduped.set(chunk.chunkId, chunk);
+    }
+  }
+
+  return [...deduped.values()].slice(0, 8);
 }
 
 async function fetchFallbackDocs(): Promise<RetrievedDocChunk[]> {
@@ -168,6 +215,7 @@ function ensureCitations(
 export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
   return async function audit(job: Job<JobPayloadMap["audit"]>) {
     await recordJobEvent({
+      projectId: job.data.projectId,
       queue: "audit",
       jobId: String(job.id),
       event: "started",
@@ -398,6 +446,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
     );
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "audit",
         jobId: String(job.id),
         event: "completed",
@@ -420,6 +469,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
         .where(eq(auditRuns.id, auditRun.id));
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "audit",
         jobId: String(job.id),
         event: "failed",

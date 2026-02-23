@@ -1,7 +1,10 @@
 {
   "/_global-error/page": "app/_global-error/page.js",
   "/_not-found/page": "app/_not-found/page.js",
+  "/api/admin/queues/dead-letter/replay/route": "app/api/admin/queues/dead-letter/replay/route.js",
+  "/api/admin/queues/dead-letter/route": "app/api/admin/queues/dead-letter/route.js",
   "/api/auth/[...all]/route": "app/api/auth/[...all]/route.js",
+  "/api/healthz/route": "app/api/healthz/route.js",
   "/api/jobs/[jobId]/events/route": "app/api/jobs/[jobId]/events/route.js",
   "/api/projects/[projectId]/audits/[auditId]/diff/route": "app/api/projects/[projectId]/audits/[auditId]/diff/route.js",
   "/api/projects/[projectId]/audits/[auditId]/pdf/route": "app/api/projects/[projectId]/audits/[auditId]/pdf/route.js",
@@ -16,6 +19,7 @@
   "/api/projects/[projectId]/working-copies/[workingCopyId]/file/route": "app/api/projects/[projectId]/working-copies/[workingCopyId]/file/route.js",
   "/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit/route": "app/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit/route.js",
   "/api/projects/route": "app/api/projects/route.js",
+  "/api/readyz/route": "app/api/readyz/route.js",
   "/dashboard/page": "app/dashboard/page.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
   "/page": "app/page.js",

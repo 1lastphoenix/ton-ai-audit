@@ -4,7 +4,7 @@ Self-hosted TON smart-contract audit platform with:
 - Next.js App Router web app + API (`apps/web`)
 - BullMQ worker runtime (`apps/worker`)
 - Shared Drizzle/Zod contracts (`packages/shared`)
-- Dockerized local infra (`infra/docker-compose.yml`)
+- Containerized local/dev and production compose stacks (`docker-compose.yml`, `docker-compose.prod.yml`)
 
 - `apps/web`: Next.js web app and API.
 - `apps/worker`: BullMQ background workers.
@@ -13,18 +13,34 @@ Self-hosted TON smart-contract audit platform with:
 
 ## Quick start
 
-1. Install dependencies:
-   - `pnpm install`
-2. Start local infra:
-   - `docker compose -f infra/docker-compose.yml up -d`
-3. Configure environment:
-   - Copy `.env.example` to `.env` and fill OAuth/OpenRouter keys.
-4. Generate and run migrations:
-   - `pnpm db:generate`
-   - `pnpm db:migrate`
-5. Start apps:
-   - Web: `pnpm dev:web`
-   - Worker: `pnpm dev:worker`
+1. Copy `.env.example` to `.env` and fill OAuth/OpenRouter keys.
+2. Install dependencies: `pnpm install`.
+3. Start full local stack (web + worker + infra): `docker compose up -d --build`.
+4. Run DB migrations: `pnpm db:migrate`.
+5. Open `http://localhost:3000`.
+
+Optional infra-only mode:
+- Start infra services only: `docker compose -f infra/docker-compose.yml up -d --build`
+- Run apps on host: `pnpm dev:web` and `pnpm dev:worker`
+
+One-liner full local verification:
+- `pnpm dev:test:all`
+- Optional custom env file: `pnpm dev:test:all -- --env-file .env.local`
+- This command builds/starts the local stack and leaves services running.
+- It checks existing local compose services first and skips `docker compose up` when the stack is already healthy.
+- It also validates production container buildability for `apps/web` and `apps/worker`.
+
+## Production deployment
+
+- Use `docker-compose.prod.yml`: `docker compose -f docker-compose.prod.yml --env-file .env up -d --build`
+- The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.
+- Internal trust-zone services run on `core` internal network.
+- Public-facing services join external proxy network `${PROXY_NETWORK:-dokploy-network}`.
+- In Dokploy, map domains to container internal ports:
+  - `web` -> `3000`
+  - `lsp-service` -> `3002` (if Monaco browser LSP is enabled)
+- Sandbox runner defaults to docker-isolated execution and requires docker socket access (`DOCKER_SOCK_PATH`).
+- If you override sandbox image tags, keep `SANDBOX_RUNNER_IMAGE` and `SANDBOX_DOCKER_IMAGE` aligned.
 
 ## Core capabilities in this scaffold
 
@@ -38,3 +54,6 @@ Self-hosted TON smart-contract audit platform with:
 - Codespaces-like Monaco workbench for read-only audited revisions and re-audit workflow
 - Sandbox runner with pinned TON toolchain bootstrap (`infra/sandbox-runner/pinned-toolchain.json`)
 - TON language-server WebSocket bridge (`infra/lsp-service`) for Monaco LSP wiring
+- Health endpoints:
+  - Web: `/api/healthz`, `/api/readyz`
+  - Worker: `/healthz`, `/readyz`

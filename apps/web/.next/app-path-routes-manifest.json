@@ -1,7 +1,10 @@
 {
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
+  "/api/admin/queues/dead-letter/replay/route": "/api/admin/queues/dead-letter/replay",
+  "/api/admin/queues/dead-letter/route": "/api/admin/queues/dead-letter",
   "/api/auth/[...all]/route": "/api/auth/[...all]",
+  "/api/healthz/route": "/api/healthz",
   "/api/jobs/[jobId]/events/route": "/api/jobs/[jobId]/events",
   "/api/projects/[projectId]/audits/[auditId]/diff/route": "/api/projects/[projectId]/audits/[auditId]/diff",
   "/api/projects/[projectId]/audits/[auditId]/pdf/route": "/api/projects/[projectId]/audits/[auditId]/pdf",
@@ -16,6 +19,7 @@
   "/api/projects/[projectId]/working-copies/[workingCopyId]/file/route": "/api/projects/[projectId]/working-copies/[workingCopyId]/file",
   "/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit/route": "/api/projects/[projectId]/working-copies/[workingCopyId]/run-audit",
   "/api/projects/route": "/api/projects",
+  "/api/readyz/route": "/api/readyz",
   "/dashboard/page": "/dashboard",
   "/favicon.ico/route": "/favicon.ico",
   "/page": "/",

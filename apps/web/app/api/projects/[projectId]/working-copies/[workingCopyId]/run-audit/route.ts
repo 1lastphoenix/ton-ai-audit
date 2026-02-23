@@ -4,6 +4,7 @@ import { runAuditSchema } from "@ton-audit/shared";
 
 import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
 import { ensureProjectAccess, snapshotWorkingCopyAndCreateAuditRun } from "@/lib/server/domain";
+import { assertAllowedModel, getAuditModelAllowlist } from "@/lib/server/model-allowlist";
 import { enqueueJob } from "@/lib/server/queues";
 
 export async function POST(
@@ -20,6 +21,9 @@ export async function POST(
     }
 
     const body = await parseJsonBody(request, runAuditSchema);
+    const modelAllowlist = await getAuditModelAllowlist();
+    assertAllowedModel(body.primaryModelId, modelAllowlist);
+    assertAllowedModel(body.fallbackModelId, modelAllowlist);
 
     const { revision, auditRun } = await snapshotWorkingCopyAndCreateAuditRun({
       projectId,

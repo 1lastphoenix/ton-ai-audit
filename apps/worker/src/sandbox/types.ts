@@ -3,10 +3,17 @@ export type SandboxFile = {
   content: string;
 };
 
+export type SandboxStepAction =
+  | "bootstrap-create-ton"
+  | "blueprint-build"
+  | "blueprint-test"
+  | "tact-check"
+  | "func-check"
+  | "tolk-check";
+
 export type SandboxStep = {
-  name: string;
-  command: string;
-  args: string[];
+  id: string;
+  action: SandboxStepAction;
   timeoutMs: number;
   optional?: boolean;
 };
@@ -23,11 +30,15 @@ export type SandboxPlan = {
   adapter: SandboxAdapter;
   languages: string[];
   reason: string;
+  bootstrapMode: "none" | "create-ton";
+  seedTemplate: "tact-empty" | "tolk-empty" | "func-empty" | null;
+  unsupportedReasons: string[];
   steps: SandboxStep[];
 };
 
 export type SandboxStepResult = {
-  name: string;
+  id: string;
+  action: SandboxStepAction;
   command: string;
   args: string[];
   status: "completed" | "failed" | "skipped" | "timeout";

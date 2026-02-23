@@ -8,12 +8,32 @@ import http from "node:http";
 const PORT = Number(process.env.PORT || 3003);
 const MAX_FILES = Number(process.env.SANDBOX_MAX_FILES || 300);
 const MAX_TOTAL_BYTES = Number(process.env.SANDBOX_MAX_TOTAL_BYTES || 25 * 1024 * 1024);
-const EXECUTION_MODE = process.env.SANDBOX_EXECUTION_MODE === "docker" ? "docker" : "local";
-const DOCKER_IMAGE = process.env.SANDBOX_DOCKER_IMAGE || "node:20-alpine";
+const MAX_REQUEST_BYTES = Number(process.env.SANDBOX_MAX_REQUEST_BYTES || 30 * 1024 * 1024);
+const EXECUTION_MODE = process.env.SANDBOX_EXECUTION_MODE === "local" ? "local" : "docker";
+const DOCKER_IMAGE = process.env.SANDBOX_DOCKER_IMAGE || "infra-sandbox-runner:latest";
 
 const pinnedToolchain = JSON.parse(
   await readFile(new URL("./pinned-toolchain.json", import.meta.url), "utf8")
 );
+
+const allowedActions = new Set([
+  "bootstrap-create-ton",
+  "blueprint-build",
+  "blueprint-test",
+  "tact-check",
+  "func-check",
+  "tolk-check"
+]);
+
+const bootstrapTemplates = new Set(["tact-empty", "tolk-empty", "func-empty"]);
+
+const actionCommandMap = {
+  "blueprint-build": { command: "blueprint", args: ["build"] },
+  "blueprint-test": { command: "blueprint", args: ["test"] },
+  "tact-check": { command: "tact", args: ["--version"] },
+  "func-check": { command: "func-js", args: ["--version"] },
+  "tolk-check": { command: "tolk-js", args: ["--help"] }
+};
 
 function readBody(request) {
   return new Promise((resolve, reject) => {
@@ -22,8 +42,8 @@ function readBody(request) {
 
     request.on("data", (chunk) => {
       total += chunk.length;
-      if (total > 10 * 1024 * 1024) {
-        reject(new Error("Request body too large"));
+      if (total > MAX_REQUEST_BYTES) {
+        reject(new Error(`Request body too large. Max ${MAX_REQUEST_BYTES}`));
         return;
       }
       chunks.push(chunk);
@@ -58,7 +78,7 @@ function validateRequest(payload) {
 
   const files = Array.isArray(payload.files) ? payload.files : [];
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
-  const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+  const rawMetadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
 
   if (files.length > MAX_FILES) {
     throw new Error(`Max files is ${MAX_FILES}`);
@@ -81,30 +101,38 @@ function validateRequest(payload) {
     }
   }
 
+  const metadata = {
+    projectId: typeof rawMetadata.projectId === "string" ? rawMetadata.projectId : null,
+    revisionId: typeof rawMetadata.revisionId === "string" ? rawMetadata.revisionId : null,
+    adapter: typeof rawMetadata.adapter === "string" ? rawMetadata.adapter : "none",
+    bootstrapMode: rawMetadata.bootstrapMode === "create-ton" ? "create-ton" : "none",
+    seedTemplate:
+      typeof rawMetadata.seedTemplate === "string" && bootstrapTemplates.has(rawMetadata.seedTemplate)
+        ? rawMetadata.seedTemplate
+        : "tact-empty"
+  };
+
   const normalizedSteps = steps.map((step) => {
     if (!step || typeof step !== "object") {
       throw new Error("Invalid step payload");
     }
 
-    if (typeof step.name !== "string" || !step.name) {
-      throw new Error("Step name is required");
-    }
-    if (typeof step.command !== "string" || !step.command) {
-      throw new Error("Step command is required");
+    if (typeof step.id !== "string" || !step.id.trim()) {
+      throw new Error("Step id is required");
     }
 
-    const args = Array.isArray(step.args)
-      ? step.args.filter((item) => typeof item === "string")
-      : [];
+    if (typeof step.action !== "string" || !allowedActions.has(step.action)) {
+      throw new Error(`Invalid step action: ${String(step.action)}`);
+    }
+
     const timeoutMs =
       typeof step.timeoutMs === "number" && Number.isFinite(step.timeoutMs)
         ? Math.max(1_000, Math.min(step.timeoutMs, 20 * 60 * 1000))
         : 60_000;
 
     return {
-      name: step.name,
-      command: step.command,
-      args,
+      id: step.id.trim(),
+      action: step.action,
       timeoutMs,
       optional: Boolean(step.optional)
     };
@@ -136,115 +164,50 @@ async function materializeWorkspace(files) {
   return { workspaceId, workspaceDir };
 }
 
-async function ensurePinnedToolchain(workspaceDir, metadata) {
+async function ensureDeterministicBlueprintWorkspace(workspaceDir, metadata) {
   const packageJsonPath = path.join(workspaceDir, "package.json");
   const blueprintConfigPath = path.join(workspaceDir, "blueprint.config.ts");
 
-  let hasPackageJson = false;
-  try {
-    await readFile(packageJsonPath, "utf8");
-    hasPackageJson = true;
-  } catch {
-    hasPackageJson = false;
-  }
-
-  if (!hasPackageJson) {
-    const packageJson = {
-      name: "sandbox-ton-project",
-      private: true,
-      version: "0.1.0",
-      scripts: {
-        build: "blueprint build",
-        test: "blueprint test"
-      },
-      devDependencies: {
-        "@ton/blueprint": pinnedToolchain.blueprintVersion,
-        "create-ton": pinnedToolchain.createTonVersion,
-        tact: pinnedToolchain.tactVersion,
-        "@ton/core": pinnedToolchain.tonCoreVersion
-      }
-    };
-    await writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), "utf8");
-  }
-
-  let hasBlueprintConfig = false;
-  try {
-    await readFile(blueprintConfigPath, "utf8");
-    hasBlueprintConfig = true;
-  } catch {
-    hasBlueprintConfig = false;
-  }
-
-  if (!hasBlueprintConfig && metadata.adapter !== "none") {
-    await writeFile(
-      blueprintConfigPath,
-      [
-        "const config = {",
-        "  contracts: \"contracts\",",
-        "  tests: \"tests\"",
-        "};",
-        "",
-        "export default config;"
-      ].join("\n"),
-      "utf8"
-    );
-  }
-}
-
-function runStepLocal(step, workspaceDir) {
-  return runProcess({
-    command: step.command,
-    args: step.args,
-    cwd: workspaceDir,
-    timeoutMs: step.timeoutMs
-  }).then((result) => {
-    if (result.status !== "completed" && step.optional) {
-      return {
-        ...result,
-        status: "skipped",
-        stderr: result.stderr || "Optional step failed and was skipped."
-      };
+  const packageJson = {
+    name: "sandbox-ton-project",
+    private: true,
+    version: "0.1.0",
+    scripts: {
+      build: "blueprint build",
+      test: "blueprint test"
+    },
+    devDependencies: {
+      "@ton/blueprint": pinnedToolchain.blueprintVersion,
+      "create-ton": pinnedToolchain.createTonVersion,
+      "@tact-lang/compiler": pinnedToolchain.tactCompilerVersion,
+      "@ton/tolk-js": pinnedToolchain.tolkJsVersion,
+      "@ton-community/func-js": pinnedToolchain.funcJsVersion,
+      "@ton/sandbox": pinnedToolchain.tonSandboxVersion,
+      "@ton/core": pinnedToolchain.tonCoreVersion,
+      "@ton/ton": pinnedToolchain.tonVersion,
+      "@ton/crypto": pinnedToolchain.tonCryptoVersion
     }
-    return result;
-  });
-}
+  };
 
-function runStepDocker(step, workspaceDir) {
-  const dockerArgs = [
-    "run",
-    "--rm",
-    "--network",
-    "none",
-    "--cpus",
-    "2",
-    "--memory",
-    "2g",
-    "--pids-limit",
-    "256",
-    "-v",
-    `${workspaceDir}:/workspace`,
-    "-w",
-    "/workspace",
-    DOCKER_IMAGE,
-    step.command,
-    ...step.args
-  ];
+  await writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), "utf8");
 
-  return runProcess({
-    command: "docker",
-    args: dockerArgs,
-    cwd: workspaceDir,
-    timeoutMs: step.timeoutMs
-  }).then((result) => {
-    if (result.status !== "completed" && step.optional) {
-      return {
-        ...result,
-        status: "skipped",
-        stderr: result.stderr || "Optional step failed and was skipped."
-      };
-    }
-    return result;
-  });
+  const seedTemplate = metadata.seedTemplate || "tact-empty";
+  await writeFile(
+    blueprintConfigPath,
+    [
+      "const config = {",
+      "  contracts: \"contracts\",",
+      "  tests: \"tests\",",
+      `  template: "${seedTemplate}"`,
+      "};",
+      "",
+      "export default config;"
+    ].join("\n"),
+    "utf8"
+  );
+
+  await mkdir(path.join(workspaceDir, "contracts"), { recursive: true });
+  await mkdir(path.join(workspaceDir, "tests"), { recursive: true });
 }
 
 function runProcess(params) {
@@ -311,27 +274,127 @@ function runProcess(params) {
   });
 }
 
+function runMappedCommand(step, workspaceDir, mappedCommand) {
+  if (EXECUTION_MODE === "local") {
+    return runProcess({
+      command: mappedCommand.command,
+      args: mappedCommand.args,
+      cwd: workspaceDir,
+      timeoutMs: step.timeoutMs
+    });
+  }
+
+  const dockerArgs = [
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--cpus",
+    "2",
+    "--memory",
+    "2g",
+    "--pids-limit",
+    "256",
+    "-v",
+    `${workspaceDir}:/workspace`,
+    "-w",
+    "/workspace",
+    DOCKER_IMAGE,
+    mappedCommand.command,
+    ...mappedCommand.args
+  ];
+
+  return runProcess({
+    command: "docker",
+    args: dockerArgs,
+    cwd: workspaceDir,
+    timeoutMs: step.timeoutMs
+  });
+}
+
+async function executeStep(step, workspaceDir, metadata) {
+  if (step.action === "bootstrap-create-ton") {
+    if (metadata.bootstrapMode !== "create-ton") {
+      return {
+        id: step.id,
+        action: step.action,
+        command: "create-ton",
+        args: ["--help"],
+        status: "skipped",
+        exitCode: 0,
+        stdout: "Bootstrap skipped: project already contains Blueprint metadata.",
+        stderr: "",
+        durationMs: 1
+      };
+    }
+
+    await ensureDeterministicBlueprintWorkspace(workspaceDir, metadata);
+    const check = await runMappedCommand(step, workspaceDir, {
+      command: "create-ton",
+      args: ["--help"]
+    });
+
+    return {
+      id: step.id,
+      action: step.action,
+      command: "create-ton",
+      args: ["--help"],
+      status: check.status,
+      exitCode: check.exitCode,
+      stdout: [check.stdout, `Seed template: ${metadata.seedTemplate}`].filter(Boolean).join("\n"),
+      stderr: check.stderr,
+      durationMs: check.durationMs
+    };
+  }
+
+  const mapped = actionCommandMap[step.action];
+  if (!mapped) {
+    return {
+      id: step.id,
+      action: step.action,
+      command: "unknown",
+      args: [],
+      status: "failed",
+      exitCode: 1,
+      stdout: "",
+      stderr: `No command mapping for action '${step.action}'`,
+      durationMs: 1
+    };
+  }
+
+  const result = await runMappedCommand(step, workspaceDir, mapped);
+  return {
+    id: step.id,
+    action: step.action,
+    command: mapped.command,
+    args: mapped.args,
+    status: result.status,
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    durationMs: result.durationMs
+  };
+}
+
 async function executeSteps(validPayload, workspaceDir) {
   const results = [];
   for (const step of validPayload.steps) {
-    const runner = EXECUTION_MODE === "docker" ? runStepDocker : runStepLocal;
-    const result = await runner(step, workspaceDir);
+    const result = await executeStep(step, workspaceDir, validPayload.metadata);
+    const shouldSkipFailure = result.status !== "completed" && step.optional;
 
-    results.push({
-      name: step.name,
-      command: step.command,
-      args: step.args,
-      status: result.status,
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      durationMs: result.durationMs
-    });
+    if (shouldSkipFailure) {
+      results.push({
+        ...result,
+        status: "skipped",
+        stderr: result.stderr || "Optional step failed and was skipped."
+      });
+      continue;
+    }
+
+    results.push(result);
 
     if (result.status === "failed" || result.status === "timeout") {
-      if (!step.optional) {
-        break;
-      }
+      break;
     }
   }
 
@@ -368,7 +431,6 @@ const server = http.createServer(async (request, response) => {
     const materialized = await materializeWorkspace(validPayload.files);
     workspaceDir = materialized.workspaceDir;
 
-    await ensurePinnedToolchain(workspaceDir, validPayload.metadata);
     const results = await executeSteps(validPayload, workspaceDir);
 
     writeJson(response, 200, {

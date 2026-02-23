@@ -6,14 +6,42 @@ import { jobEvents } from "@ton-audit/shared";
 
 import { requireSession, toApiErrorResponse } from "@/lib/server/api";
 import { db } from "@/lib/server/db";
+import { ensureProjectAccess } from "@/lib/server/domain";
+import { canReadJobEvents } from "@/lib/server/job-events-auth";
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
   try {
-    await requireSession(request);
+    const session = await requireSession(request);
     const { jobId } = await context.params;
+    const projectId = new URL(request.url).searchParams.get("projectId");
+    if (!projectId) {
+      return NextResponse.json({ error: "projectId query parameter is required" }, { status: 400 });
+    }
+
+    const project = await ensureProjectAccess(projectId, session.user.id);
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const [eventScope] = await db
+      .select({ projectId: jobEvents.projectId })
+      .from(jobEvents)
+      .where(eq(jobEvents.jobId, jobId))
+      .orderBy(jobEvents.createdAt)
+      .limit(1);
+
+    if (
+      !eventScope ||
+      !canReadJobEvents({
+        requestedProjectId: projectId,
+        eventProjectId: eventScope.projectId
+      })
+    ) {
+      return NextResponse.json({ error: "Job not found for project scope" }, { status: 404 });
+    }
 
     const encoder = new TextEncoder();
     let lastTimestamp = new Date(0);
@@ -24,7 +52,13 @@ export async function GET(
           const events = await db
             .select()
             .from(jobEvents)
-            .where(and(eq(jobEvents.jobId, jobId), gt(jobEvents.createdAt, lastTimestamp)))
+            .where(
+              and(
+                eq(jobEvents.jobId, jobId),
+                eq(jobEvents.projectId, projectId),
+                gt(jobEvents.createdAt, lastTimestamp)
+              )
+            )
             .orderBy(jobEvents.createdAt);
 
           if (!events.length) {

@@ -82,6 +82,7 @@ function detectToolchain(files: Awaited<ReturnType<typeof loadRevisionFilesWithC
 export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
   return async function verify(job: Job<JobPayloadMap["verify"]>) {
     await recordJobEvent({
+      projectId: job.data.projectId,
       queue: "verify",
       jobId: String(job.id),
       event: "started",
@@ -203,8 +204,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       });
 
       for (const sandboxResult of sandboxResults) {
-        const stepStdoutKey = `verification/${auditRun.id}/sandbox/${sandboxResult.name}/stdout.txt`;
-        const stepStderrKey = `verification/${auditRun.id}/sandbox/${sandboxResult.name}/stderr.txt`;
+        const stepStdoutKey = `verification/${auditRun.id}/sandbox/${sandboxResult.id}/stdout.txt`;
+        const stepStderrKey = `verification/${auditRun.id}/sandbox/${sandboxResult.id}/stderr.txt`;
 
         await Promise.all([
           putObject({
@@ -221,7 +222,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
 
         await db.insert(verificationSteps).values({
           auditRunId: auditRun.id,
-          stepType: sandboxResult.name,
+          stepType: sandboxResult.id,
           toolchain: "sandbox-runner",
           status:
             sandboxResult.status === "completed"
@@ -231,7 +232,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
                 : "failed",
           stdoutKey: stepStdoutKey,
           stderrKey: stepStderrKey,
-          summary: `${sandboxResult.command} ${sandboxResult.args.join(" ")}`.trim(),
+          summary: `[${sandboxResult.action}] ${sandboxResult.command} ${sandboxResult.args.join(" ")}`.trim(),
           durationMs: sandboxResult.durationMs
         });
       }
@@ -248,6 +249,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       );
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "verify",
         jobId: String(job.id),
         event: "completed",
@@ -269,6 +271,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         .where(eq(auditRuns.id, auditRun.id));
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "verify",
         jobId: String(job.id),
         event: "failed",

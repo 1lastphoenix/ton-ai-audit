@@ -7,7 +7,7 @@ import { uploadCompleteSchema, uploads } from "@ton-audit/shared";
 import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
 import { ensureProjectAccess } from "@/lib/server/domain";
 import { db } from "@/lib/server/db";
-import { completeMultipartUpload } from "@/lib/server/s3";
+import { completeMultipartUpload, objectExists, putObject } from "@/lib/server/s3";
 
 export async function POST(
   request: Request,
@@ -32,14 +32,61 @@ export async function POST(
       return NextResponse.json({ error: "Upload not found" }, { status: 404 });
     }
 
-    if (upload.multipartUploadId && body.eTags.length) {
-      await completeMultipartUpload({
+    if (upload.type === "zip") {
+      if (upload.multipartUploadId && body.eTags.length) {
+        await completeMultipartUpload({
+          key: upload.s3Key,
+          uploadId: upload.multipartUploadId,
+          parts: body.eTags.map((item) => ({
+            ETag: item.eTag,
+            PartNumber: item.partNumber
+          }))
+        });
+      }
+    } else {
+      const metadataFiles = Array.isArray((upload.metadata as { files?: unknown[] } | null)?.files)
+        ? ((upload.metadata as { files: Array<Record<string, unknown>> }).files ?? [])
+        : [];
+
+      if (metadataFiles.length === 0) {
+        return NextResponse.json({ error: "Upload manifest is empty" }, { status: 400 });
+      }
+
+      const completedPathSet = new Set(body.completedFiles.map((file) => file.path));
+      for (const file of metadataFiles) {
+        const expectedPath = typeof file.path === "string" ? file.path : null;
+        const expectedKey = typeof file.s3Key === "string" ? file.s3Key : null;
+        if (!expectedPath || !expectedKey) {
+          return NextResponse.json({ error: "Upload manifest is invalid" }, { status: 400 });
+        }
+        if (!completedPathSet.has(expectedPath)) {
+          return NextResponse.json(
+            { error: `Missing completed file for ${expectedPath}` },
+            { status: 400 }
+          );
+        }
+
+        const exists = await objectExists(expectedKey);
+        if (!exists) {
+          return NextResponse.json(
+            { error: `File object missing in storage for ${expectedPath}` },
+            { status: 400 }
+          );
+        }
+      }
+
+      await putObject({
         key: upload.s3Key,
-        uploadId: upload.multipartUploadId,
-        parts: body.eTags.map((item) => ({
-          ETag: item.eTag,
-          PartNumber: item.partNumber
-        }))
+        body: JSON.stringify(
+          {
+            files: metadataFiles,
+            completedFiles: body.completedFiles,
+            completedAt: new Date().toISOString()
+          },
+          null,
+          2
+        ),
+        contentType: "application/json"
       });
     }
 
@@ -47,6 +94,13 @@ export async function POST(
       .update(uploads)
       .set({
         status: "uploaded",
+        metadata:
+          upload.type === "file-set"
+            ? {
+                ...(upload.metadata as Record<string, unknown>),
+                completedFiles: body.completedFiles
+              }
+            : upload.metadata,
         updatedAt: new Date()
       })
       .where(eq(uploads.id, upload.id))

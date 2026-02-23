@@ -1,7 +1,12 @@
 {
+  "nodeVersion": "22",
   "createTonVersion": "0.31.0",
   "blueprintVersion": "0.43.0",
-  "tactVersion": "0.1.0",
+  "tactCompilerVersion": "1.6.13",
+  "tolkJsVersion": "1.2.0",
+  "funcJsVersion": "0.11.0",
+  "tonSandboxVersion": "0.41.0",
   "tonCoreVersion": "0.63.1",
-  "nodeVersion": "20"
+  "tonVersion": "16.2.2",
+  "tonCryptoVersion": "3.3.0"
 }

@@ -83,6 +83,7 @@ function renderReportHtml(params: {
 export function createPdfProcessor() {
   return async function pdf(job: Job<JobPayloadMap["pdf"]>) {
     await recordJobEvent({
+      projectId: job.data.projectId,
       queue: "pdf",
       jobId: String(job.id),
       event: "started",
@@ -156,6 +157,7 @@ export function createPdfProcessor() {
         .where(eq(pdfExports.auditRunId, auditRun.id));
 
       await recordJobEvent({
+        projectId: job.data.projectId,
         queue: "pdf",
         jobId: String(job.id),
         event: "completed",

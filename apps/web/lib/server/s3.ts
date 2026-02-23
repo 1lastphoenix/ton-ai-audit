@@ -3,6 +3,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -10,25 +11,47 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-import { env } from "./env";
+import { getEnv } from "./env";
 
-export const s3Client = new S3Client({
-  endpoint: env.MINIO_ENDPOINT,
-  forcePathStyle: true,
-  region: env.MINIO_REGION,
-  credentials: {
-    accessKeyId: env.MINIO_ACCESS_KEY,
-    secretAccessKey: env.MINIO_SECRET_KEY
+const globalForS3 = globalThis as unknown as {
+  s3Client?: S3Client;
+};
+
+function getS3Client() {
+  if (globalForS3.s3Client) {
+    return globalForS3.s3Client;
   }
-});
+
+  const env = getEnv();
+  const client = new S3Client({
+    endpoint: env.MINIO_ENDPOINT,
+    forcePathStyle: true,
+    region: env.MINIO_REGION,
+    credentials: {
+      accessKeyId: env.MINIO_ACCESS_KEY,
+      secretAccessKey: env.MINIO_SECRET_KEY
+    }
+  });
+
+  if (env.NODE_ENV !== "production") {
+    globalForS3.s3Client = client;
+  }
+
+  return client;
+}
+
+function getBucketName() {
+  return getEnv().MINIO_BUCKET;
+}
 
 export async function createMultipartUpload(params: {
   key: string;
   contentType: string;
   metadata?: Record<string, string>;
 }) {
+  const s3Client = getS3Client();
   const command = new CreateMultipartUploadCommand({
-    Bucket: env.MINIO_BUCKET,
+    Bucket: getBucketName(),
     Key: params.key,
     ContentType: params.contentType,
     Metadata: params.metadata
@@ -42,8 +65,9 @@ export async function getMultipartUploadPartSignedUrl(params: {
   uploadId: string;
   partNumber: number;
 }) {
+  const s3Client = getS3Client();
   const command = new UploadPartCommand({
-    Bucket: env.MINIO_BUCKET,
+    Bucket: getBucketName(),
     Key: params.key,
     UploadId: params.uploadId,
     PartNumber: params.partNumber
@@ -57,8 +81,9 @@ export async function getPutObjectSignedUrl(params: {
   contentType: string;
   expiresInSeconds?: number;
 }) {
+  const s3Client = getS3Client();
   const command = new PutObjectCommand({
-    Bucket: env.MINIO_BUCKET,
+    Bucket: getBucketName(),
     Key: params.key,
     ContentType: params.contentType
   });
@@ -73,8 +98,9 @@ export async function completeMultipartUpload(params: {
   uploadId: string;
   parts: CompletedPart[];
 }) {
+  const s3Client = getS3Client();
   const command = new CompleteMultipartUploadCommand({
-    Bucket: env.MINIO_BUCKET,
+    Bucket: getBucketName(),
     Key: params.key,
     UploadId: params.uploadId,
     MultipartUpload: {
@@ -86,12 +112,28 @@ export async function completeMultipartUpload(params: {
 }
 
 export async function getObjectSignedUrl(key: string, expiresInSeconds = 900) {
+  const s3Client = getS3Client();
   const command = new GetObjectCommand({
-    Bucket: env.MINIO_BUCKET,
+    Bucket: getBucketName(),
     Key: key
   });
 
   return getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
+}
+
+export async function objectExists(key: string) {
+  const s3Client = getS3Client();
+  try {
+    await s3Client.send(
+      new HeadObjectCommand({
+        Bucket: getBucketName(),
+        Key: key
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function putObject(params: {
@@ -99,8 +141,9 @@ export async function putObject(params: {
   body: string | Uint8Array;
   contentType: string;
 }) {
+  const s3Client = getS3Client();
   const command = new PutObjectCommand({
-    Bucket: env.MINIO_BUCKET,
+    Bucket: getBucketName(),
     Key: params.key,
     Body: params.body,
     ContentType: params.contentType
@@ -110,18 +153,20 @@ export async function putObject(params: {
 }
 
 export async function deleteObject(key: string) {
+  const s3Client = getS3Client();
   return s3Client.send(
     new DeleteObjectCommand({
-      Bucket: env.MINIO_BUCKET,
+      Bucket: getBucketName(),
       Key: key
     })
   );
 }
 
 export async function getObjectText(key: string): Promise<string | null> {
+  const s3Client = getS3Client();
   const response = await s3Client.send(
     new GetObjectCommand({
-      Bucket: env.MINIO_BUCKET,
+      Bucket: getBucketName(),
       Key: key
     })
   );
