@@ -33,6 +33,9 @@ export type VerificationStepStatus = z.infer<typeof verificationStepStatusSchema
 export const uploadTypeSchema = z.enum(["file-set", "zip"]);
 export type UploadType = z.infer<typeof uploadTypeSchema>;
 
+export const projectLifecycleStateSchema = z.enum(["initializing", "ready", "deleted"]);
+export type ProjectLifecycleState = z.infer<typeof projectLifecycleStateSchema>;
+
 export const uploadStatusSchema = z.enum([
   "initialized",
   "uploaded",

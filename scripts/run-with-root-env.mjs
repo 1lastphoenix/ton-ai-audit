@@ -70,8 +70,8 @@ const child = spawn(command, {
   stdio: "inherit",
   shell: true,
   env: {
-    ...envFromRoot,
-    ...process.env
+    ...process.env,
+    ...envFromRoot
   }
 });
 

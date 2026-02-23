@@ -23,9 +23,9 @@ export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormPr
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="rounded-lg border border-white/10 bg-zinc-900/80 p-4">
-      <div className="mb-2 text-sm font-medium text-zinc-200">Upload source or Blueprint ZIP</div>
-      <p className="mb-3 text-xs text-zinc-400">
+    <div className="bg-card rounded-lg border p-4">
+      <div className="mb-2 text-sm font-medium">Upload source or Blueprint ZIP</div>
+      <p className="text-muted-foreground mb-3 text-xs">
         Upload one file or one zip per revision. ZIP is recommended for multi-file projects.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -188,7 +188,7 @@ export function ProjectUploadForm({ projectId, onUploaded }: ProjectUploadFormPr
           {isUploading ? "Uploading..." : "Upload"}
         </Button>
       </div>
-      {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
+      {error ? <p className="text-destructive mt-2 text-xs">{error}</p> : null}
     </div>
   );
 }

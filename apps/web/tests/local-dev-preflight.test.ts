@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -9,6 +9,14 @@ const preflight = require("../../../scripts/local-dev-preflight.mjs") as {
   getHealth: (row: Record<string, string | undefined>) => string;
   getServiceName: (row: Record<string, string | undefined>) => string;
   getBuildEnv: (envObject: Record<string, string>) => Record<string, string>;
+  validateMinioCredentials: (
+    envObject: Record<string, string>,
+    deps?: {
+      awsSdk?: { S3Client: unknown; HeadBucketCommand: unknown };
+      createClient?: (config: Record<string, unknown>) => { send: (command: unknown) => Promise<unknown> };
+      createHeadBucketCommand?: (input: { Bucket: string }) => unknown;
+    }
+  ) => Promise<void>;
   localComposeServices: string[];
   shouldStartLocalStack: (
     rows: Array<Record<string, string | undefined>>,
@@ -25,6 +33,7 @@ const {
   getHealth,
   getServiceName,
   getBuildEnv,
+  validateMinioCredentials,
   getState,
   shouldStartLocalStack,
   findMissingRequiredEnv,
@@ -177,5 +186,57 @@ MINIO_BUCKET=ton-audit
     expect(getServiceName({ service: "postgres" })).toBe("postgres");
     expect(getState({ Status: "Up 8 seconds" })).toBe("running");
     expect(getHealth({ health: "healthy" })).toBe("healthy");
+  });
+
+  it("validates MinIO bucket access with configured credentials", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const createClient = vi.fn(() => ({ send }));
+    const createHeadBucketCommand = vi.fn((input) => input);
+
+    await validateMinioCredentials(
+      {
+        MINIO_ENDPOINT: "http://localhost:9000",
+        MINIO_REGION: "us-east-1",
+        MINIO_BUCKET: "ton-audit",
+        MINIO_ACCESS_KEY: "minioadmin",
+        MINIO_SECRET_KEY: "minioadmin"
+      },
+      {
+        awsSdk: { S3Client: class {}, HeadBucketCommand: class {} },
+        createClient,
+        createHeadBucketCommand
+      }
+    );
+
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "http://localhost:9000",
+        region: "us-east-1"
+      })
+    );
+    expect(send).toHaveBeenCalledWith({ Bucket: "ton-audit" });
+  });
+
+  it("returns actionable MinIO errors when credentials cannot access bucket", async () => {
+    const createClient = vi.fn(() => ({
+      send: vi.fn().mockRejectedValue(new Error("InvalidAccessKeyId"))
+    }));
+
+    await expect(
+      validateMinioCredentials(
+        {
+          MINIO_ENDPOINT: "http://localhost:9000",
+          MINIO_REGION: "us-east-1",
+          MINIO_BUCKET: "ton-audit",
+          MINIO_ACCESS_KEY: "bad-key",
+          MINIO_SECRET_KEY: "bad-secret"
+        },
+        {
+          awsSdk: { S3Client: class {}, HeadBucketCommand: class {} },
+          createClient,
+          createHeadBucketCommand: (input) => input
+        }
+      )
+    ).rejects.toThrow(/cannot access bucket/i);
   });
 });

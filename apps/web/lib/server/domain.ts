@@ -4,6 +4,7 @@ import {
   and,
   desc,
   eq,
+  ne,
   sql
 } from "drizzle-orm";
 
@@ -11,7 +12,9 @@ import {
   createContentFingerprint,
   detectLanguageFromPath,
   normalizePath,
+  projectLifecycleStateSchema,
   type Language,
+  type ProjectLifecycleState,
   projects,
   projectMembers,
   revisions,
@@ -30,7 +33,11 @@ import { getObjectText, putObject } from "./s3";
 
 export async function ensureProjectAccess(projectId: string, userId: string) {
   const ownedProject = await db.query.projects.findFirst({
-    where: and(eq(projects.id, projectId), eq(projects.ownerUserId, userId))
+    where: and(
+      eq(projects.id, projectId),
+      eq(projects.ownerUserId, userId),
+      ne(projects.lifecycleState, "deleted")
+    )
   });
 
   if (ownedProject) {
@@ -46,7 +53,17 @@ export async function ensureProjectAccess(projectId: string, userId: string) {
   }
 
   return db.query.projects.findFirst({
-    where: eq(projects.id, projectId)
+    where: and(eq(projects.id, projectId), ne(projects.lifecycleState, "deleted"))
+  });
+}
+
+export async function ensureProjectOwnerAccess(projectId: string, userId: string) {
+  return db.query.projects.findFirst({
+    where: and(
+      eq(projects.id, projectId),
+      eq(projects.ownerUserId, userId),
+      ne(projects.lifecycleState, "deleted")
+    )
   });
 }
 
@@ -54,13 +71,20 @@ export async function createProject(input: {
   ownerUserId: string;
   name: string;
   slug: string;
+  lifecycleState?: ProjectLifecycleState;
 }) {
+  const lifecycleState = input.lifecycleState ?? "ready";
+  if (!projectLifecycleStateSchema.safeParse(lifecycleState).success) {
+    throw new Error("Invalid project lifecycle state");
+  }
+
   const [project] = await db
     .insert(projects)
     .values({
       ownerUserId: input.ownerUserId,
       name: input.name,
-      slug: input.slug
+      slug: input.slug,
+      lifecycleState
     })
     .returning();
 
@@ -75,6 +99,177 @@ export async function createProject(input: {
   });
 
   return project;
+}
+
+type ScaffoldFile = {
+  path: string;
+  content: string;
+};
+
+function buildMinimalBlueprintScaffold(projectName: string): ScaffoldFile[] {
+  const normalizedName = projectName.trim() || "TON Audit Project";
+
+  return [
+    {
+      path: "README.md",
+      content: `# ${normalizedName}
+
+This project was initialized with the TON Audit Platform scaffold.
+
+## Structure
+
+- \`contracts/main.tolk\`: Starter contract source.
+- \`tests/main.spec.ts\`: Starter test placeholder.
+`
+    },
+    {
+      path: "contracts/main.tolk",
+      content: `// Minimal Tolk scaffold file
+
+fun add(a: Int, b: Int): Int {
+  return a + b;
+}
+`
+    },
+    {
+      path: "tests/main.spec.ts",
+      content: `// Replace with Blueprint test cases.
+
+describe("main contract", () => {
+  it("bootstraps the project", () => {
+    expect(true).toBe(true);
+  });
+});
+`
+    }
+  ];
+}
+
+async function storeFileBlob(params: { revisionId: string; content: string }) {
+  const sha = createContentFingerprint(params.content);
+
+  const existing = await db.query.fileBlobs.findFirst({
+    where: eq(fileBlobs.sha256, sha)
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const s3Key = `revisions/${params.revisionId}/files/${randomUUID()}`;
+  await putObject({
+    key: s3Key,
+    body: params.content,
+    contentType: "text/plain; charset=utf-8"
+  });
+
+  const [createdBlob] = await db
+    .insert(fileBlobs)
+    .values({
+      sha256: sha,
+      sizeBytes: Buffer.byteLength(params.content, "utf8"),
+      s3Key,
+      contentType: "text/plain; charset=utf-8"
+    })
+    .returning();
+
+  if (!createdBlob) {
+    throw new Error("Failed to persist file blob");
+  }
+
+  return createdBlob;
+}
+
+export async function createScaffoldRevision(params: {
+  projectId: string;
+  createdByUserId: string;
+  projectName: string;
+}) {
+  const [latestRevision] = await db
+    .select()
+    .from(revisions)
+    .where(eq(revisions.projectId, params.projectId))
+    .orderBy(desc(revisions.createdAt))
+    .limit(1);
+
+  const [revision] = await db
+    .insert(revisions)
+    .values({
+      projectId: params.projectId,
+      parentRevisionId: latestRevision?.id ?? null,
+      source: "upload",
+      createdByUserId: params.createdByUserId,
+      isImmutable: true,
+      description: "Initial scaffold revision"
+    })
+    .returning();
+
+  if (!revision) {
+    throw new Error("Failed to create scaffold revision");
+  }
+
+  const scaffoldFiles = buildMinimalBlueprintScaffold(params.projectName);
+  const blobs = await Promise.all(
+    scaffoldFiles.map((file) =>
+      storeFileBlob({
+        revisionId: revision.id,
+        content: file.content
+      })
+    )
+  );
+
+  await db.insert(revisionFiles).values(
+    scaffoldFiles.map((file, index) => ({
+      revisionId: revision.id,
+      path: normalizePath(file.path),
+      language: detectLanguageFromPath(file.path),
+      blobId: blobs[index]!.id,
+      isTestFile: /(^|\/)(test|tests|__tests__)\/|\.spec\./i.test(file.path)
+    }))
+  );
+
+  return revision;
+}
+
+export async function softDeleteProject(params: { projectId: string }) {
+  const [project] = await db
+    .update(projects)
+    .set({
+      lifecycleState: "deleted",
+      deletedAt: new Date(),
+      updatedAt: new Date()
+    })
+    .where(eq(projects.id, params.projectId))
+    .returning();
+
+  return project ?? null;
+}
+
+export async function markProjectReadyIfInitializing(projectId: string) {
+  const [project] = await db
+    .update(projects)
+    .set({
+      lifecycleState: "ready",
+      deletedAt: null,
+      updatedAt: new Date()
+    })
+    .where(and(eq(projects.id, projectId), eq(projects.lifecycleState, "initializing")))
+    .returning();
+
+  return project ?? null;
+}
+
+export async function markProjectDeletedIfInitializing(projectId: string) {
+  const [project] = await db
+    .update(projects)
+    .set({
+      lifecycleState: "deleted",
+      deletedAt: new Date(),
+      updatedAt: new Date()
+    })
+    .where(and(eq(projects.id, projectId), eq(projects.lifecycleState, "initializing")))
+    .returning();
+
+  return project ?? null;
 }
 
 export async function createRevisionFromUpload(params: {

@@ -13,4 +13,25 @@ describe("drizzle migrations", () => {
 
     expect(sql).toMatch(/create extension if not exists "?vector"?;/i);
   });
+
+  it("uses a partial unique index for active project slugs", () => {
+    const migrationsDir = path.resolve(process.cwd(), "drizzle");
+    const migrationFiles = fs.readdirSync(migrationsDir).filter((filename) => filename.endsWith(".sql"));
+
+    const migrationWithSlugIndex = migrationFiles.find((filename) => {
+      const sql = fs.readFileSync(path.join(migrationsDir, filename), "utf8");
+      return sql.includes("projects_owner_slug_active_unique");
+    });
+
+    expect(migrationWithSlugIndex).toBeDefined();
+
+    const migrationSql = fs.readFileSync(
+      path.join(migrationsDir, migrationWithSlugIndex as string),
+      "utf8"
+    );
+
+    expect(migrationSql).toMatch(/drop constraint "projects_owner_slug_unique"/i);
+    expect(migrationSql).toMatch(/create unique index "projects_owner_slug_active_unique"/i);
+    expect(migrationSql).toMatch(/where "projects"\."deleted_at" is null/i);
+  });
 });

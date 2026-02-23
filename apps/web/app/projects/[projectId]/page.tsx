@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ProjectWorkspace } from "@/components/projects/project-workspace";
@@ -15,7 +14,7 @@ export default async function ProjectPage(props: {
   const { projectId } = await props.params;
 
   const project = await ensureProjectAccess(projectId, session.user.id);
-  if (!project) {
+  if (!project || project.lifecycleState !== "ready") {
     notFound();
   }
 
@@ -23,20 +22,11 @@ export default async function ProjectPage(props: {
   const modelAllowlist = await getAuditModelAllowlist();
 
   return (
-    <main className="min-h-screen bg-[#0b0f15] text-zinc-100">
-      <div className="mx-auto grid max-w-[1500px] gap-4 px-4 py-5 lg:px-6">
-        <header className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Project</p>
-            <h1 className="text-xl font-semibold">{project.name}</h1>
-          </div>
-          <Link href="/dashboard" className="text-sm text-sky-300 hover:text-sky-200">
-            Back to dashboard
-          </Link>
-        </header>
-
+    <main className="bg-background text-foreground min-h-screen">
+      <div className="mx-auto max-w-[1500px] px-2 py-2 lg:px-3 lg:py-3">
         <ProjectWorkspace
           projectId={project.id}
+          projectName={project.name}
           initialRevisionId={latest.latestRevision?.id ?? null}
           initialAuditId={latest.latestAudit?.id ?? null}
           modelAllowlist={modelAllowlist}

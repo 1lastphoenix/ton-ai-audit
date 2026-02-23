@@ -84,7 +84,16 @@ export type AuditFinding = z.infer<typeof auditFindingSchema>;
 
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(120),
-  slug: z.string().regex(/^[a-z0-9-]+$/)
+  slug: z.string().regex(/^[a-z0-9-]+$/),
+  initialization: z.discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("scaffold"),
+      language: z.literal("tolk")
+    }),
+    z.object({
+      mode: z.literal("upload")
+    })
+  ])
 });
 
 const uploadInitSingleFileSchema = z.object({

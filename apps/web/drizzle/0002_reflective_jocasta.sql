@@ -1,0 +1,2 @@
+ALTER TABLE "projects" DROP CONSTRAINT "projects_owner_slug_unique";--> statement-breakpoint
+CREATE UNIQUE INDEX "projects_owner_slug_active_unique" ON "projects" USING btree ("owner_user_id","slug") WHERE "projects"."deleted_at" is null;

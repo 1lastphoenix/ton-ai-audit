@@ -1,8 +1,8 @@
-import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { projects } from "@ton-audit/shared";
 
+import { ProjectCard } from "@/components/dashboard/project-card";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { ProjectCreateForm } from "@/components/dashboard/project-create-form";
 import { db } from "@/lib/server/db";
@@ -16,43 +16,42 @@ export default async function DashboardPage() {
   const projectRows = await db
     .select()
     .from(projects)
-    .where(eq(projects.ownerUserId, session.user.id))
+    .where(
+      and(
+        eq(projects.ownerUserId, session.user.id),
+        eq(projects.lifecycleState, "ready"),
+        isNull(projects.deletedAt)
+      )
+    )
     .orderBy(desc(projects.createdAt));
 
   return (
-    <main className="min-h-screen bg-[#0b0f15] text-zinc-100">
-      <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8">
-        <header className="flex items-center justify-between gap-3">
+    <main className="bg-background text-foreground min-h-screen">
+      <div className="mx-auto grid max-w-6xl gap-6 px-6 py-10">
+        <header className="bg-card flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
           <div>
-            <h1 className="text-2xl font-semibold">TON Audit Workspace</h1>
-            <p className="text-sm text-zinc-400">{session.user.email}</p>
+            <h1 className="text-2xl font-semibold tracking-tight">TON Audit Workspace</h1>
+            <p className="text-muted-foreground text-sm">{session.user.email ?? "Authenticated user"}</p>
           </div>
-          <SignOutButton />
+          <div className="flex items-center gap-2">
+            <ProjectCreateForm />
+            <SignOutButton />
+          </div>
         </header>
 
-        <ProjectCreateForm />
-
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projectRows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-white/15 p-6 text-sm text-zinc-400">
-              No projects yet. Create one to start auditing.
+            <div className="text-muted-foreground bg-card rounded-xl border border-dashed p-8 text-sm">
+              No ready projects yet. Create one to start auditing.
             </div>
           ) : (
-            projectRows.map((project) => (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                className="rounded-lg border border-white/10 bg-[#11161e] p-4 hover:border-sky-400/50"
-              >
-                <div className="font-medium">{project.name}</div>
-                <div className="text-xs text-zinc-400">{project.slug}</div>
-                <div className="mt-2 text-xs text-zinc-500">
-                  Created {new Date(project.createdAt).toLocaleString()}
-                </div>
-              </Link>
-            ))
+            projectRows.map((project) => <ProjectCard key={project.id} project={project} />)
           )}
         </section>
+
+        <div className="text-muted-foreground text-xs">
+          Need to import existing contracts? Use Create project - Upload Smart Contracts.
+        </div>
       </div>
     </main>
   );

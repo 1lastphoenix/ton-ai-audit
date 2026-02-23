@@ -44,9 +44,40 @@ export async function requireSession(request: Request) {
   return session;
 }
 
+function getPgErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function getPgConstraint(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const constraint = (error as { constraint?: unknown }).constraint;
+  return typeof constraint === "string" ? constraint : null;
+}
+
 export function toApiErrorResponse(error: unknown) {
   if (error instanceof ApiError) {
     return jsonError(error.message, error.statusCode);
+  }
+
+  const code = getPgErrorCode(error);
+  if (code === "23505") {
+    const constraint = getPgConstraint(error);
+    if (
+      constraint === "projects_owner_slug_unique" ||
+      constraint === "projects_owner_slug_active_unique"
+    ) {
+      return jsonError("A project with this slug already exists for your account.", 409);
+    }
+
+    return jsonError("Resource already exists.", 409);
   }
 
   if (

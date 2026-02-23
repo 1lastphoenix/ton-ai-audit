@@ -9,6 +9,7 @@ import {
   auditRuns,
   detectLanguageFromPath,
   normalizePath,
+  projects,
   revisions,
   systemSettings,
   type JobPayloadMap,
@@ -224,6 +225,15 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         })
         .where(eq(uploads.id, upload.id));
 
+      await db
+        .update(projects)
+        .set({
+          lifecycleState: "ready",
+          deletedAt: null,
+          updatedAt: new Date()
+        })
+        .where(and(eq(projects.id, revision.projectId), eq(projects.lifecycleState, "initializing")));
+
       await deps.enqueueJob(
         "verify",
         {
@@ -256,6 +266,15 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           updatedAt: new Date()
         })
         .where(eq(uploads.id, upload.id));
+
+      await db
+        .update(projects)
+        .set({
+          lifecycleState: "deleted",
+          deletedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(and(eq(projects.id, job.data.projectId), eq(projects.lifecycleState, "initializing")));
 
       await recordJobEvent({
         projectId: job.data.projectId,

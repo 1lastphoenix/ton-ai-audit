@@ -10,15 +10,18 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import {
   auditRunStatusSchema,
   findingTransitionSchema,
   languageSchema,
   pdfExportStatusSchema,
+  projectLifecycleStateSchema,
   revisionSourceSchema,
   uploadStatusSchema,
   uploadTypeSchema,
@@ -66,6 +69,10 @@ const tsvectorType = customType<{
 
 export const uploadTypeEnum = pgEnum("upload_type", toPgEnumValues(uploadTypeSchema.options));
 export const uploadStatusEnum = pgEnum("upload_status", toPgEnumValues(uploadStatusSchema.options));
+export const projectLifecycleStateEnum = pgEnum(
+  "project_lifecycle_state",
+  toPgEnumValues(projectLifecycleStateSchema.options)
+);
 export const revisionSourceEnum = pgEnum(
   "revision_source",
   toPgEnumValues(revisionSourceSchema.options)
@@ -181,12 +188,17 @@ export const projects = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 120 }).notNull(),
     slug: varchar("slug", { length: 140 }).notNull(),
+    lifecycleState: projectLifecycleStateEnum("lifecycle_state").notNull().default("ready"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
     ownerIdx: index("projects_owner_idx").on(table.ownerUserId),
-    slugUnique: unique("projects_owner_slug_unique").on(table.ownerUserId, table.slug)
+    lifecycleIdx: index("projects_lifecycle_idx").on(table.lifecycleState),
+    slugUnique: uniqueIndex("projects_owner_slug_active_unique")
+      .on(table.ownerUserId, table.slug)
+      .where(sql`${table.deletedAt} is null`)
   })
 );
 

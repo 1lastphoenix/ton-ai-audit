@@ -218,6 +218,78 @@ export function isAuthFailureError(message) {
   );
 }
 
+function trimTrailingSlash(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.replace(/\/+$/, "");
+}
+
+function toErrorMessage(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Unknown error";
+}
+
+export async function validateMinioCredentials(
+  envObject,
+  deps = {}
+) {
+  const endpoint = trimTrailingSlash(envObject.MINIO_ENDPOINT);
+  const region = envObject.MINIO_REGION || "us-east-1";
+  const bucket = envObject.MINIO_BUCKET;
+
+  if (!endpoint || !bucket || !envObject.MINIO_ACCESS_KEY || !envObject.MINIO_SECRET_KEY) {
+    throw new Error("Missing required MinIO credentials or endpoint configuration.");
+  }
+
+  const { S3Client, HeadBucketCommand } = deps.awsSdk
+    ? deps.awsSdk
+    : await import("@aws-sdk/client-s3");
+
+  const client = deps.createClient
+    ? deps.createClient({
+        endpoint,
+        forcePathStyle: true,
+        region,
+        credentials: {
+          accessKeyId: envObject.MINIO_ACCESS_KEY,
+          secretAccessKey: envObject.MINIO_SECRET_KEY
+        }
+      })
+    : new S3Client({
+        endpoint,
+        forcePathStyle: true,
+        region,
+        credentials: {
+          accessKeyId: envObject.MINIO_ACCESS_KEY,
+          secretAccessKey: envObject.MINIO_SECRET_KEY
+        }
+      });
+
+  const command = deps.createHeadBucketCommand
+    ? deps.createHeadBucketCommand({ Bucket: bucket })
+    : new HeadBucketCommand({ Bucket: bucket });
+
+  try {
+    await client.send(command);
+  } catch (error) {
+    const details = toErrorMessage(error);
+    throw new Error(
+      `MinIO credentials cannot access bucket '${bucket}'. ` +
+        `Verify MINIO_ACCESS_KEY/MINIO_SECRET_KEY and bucket permissions. ` +
+        `Details: ${details}`
+    );
+  }
+}
+
 export function getBuildEnv(envObject) {
   return {
     ...envObject,
@@ -390,6 +462,8 @@ export async function runLocalDevPreflight(options = {}) {
   }
 
   await waitForServiceReady(envFile, envFromFile, "postgres");
+  await waitForHttpOk(`${trimTrailingSlash(envFromFile.MINIO_ENDPOINT)}/minio/health/live`);
+  await validateMinioCredentials(envFromFile);
 
   try {
     runCommand("pnpm db:migrate", envFromFile);
