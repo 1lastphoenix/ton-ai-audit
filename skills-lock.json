@@ -35,6 +35,11 @@
       "source": "better-auth/skills",
       "sourceType": "github",
       "computedHash": "dc08ccb8c3a5c468437894aea27731c06ca655553a39b5dffd67d0e429a70c6b"
+    },
+    "pgvector-semantic-search": {
+      "source": "timescale/pg-aiguide",
+      "sourceType": "github",
+      "computedHash": "2253fe81ca558eb2b6bbb1a0e410b3223352ba18b378d29c0dd1a3ab33c62d15"
     }
   }
 }
