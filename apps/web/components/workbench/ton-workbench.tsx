@@ -122,7 +122,16 @@ type TonWorkbenchProps = {
 };
 
 const MonacoEditor = dynamic(
-  () => import("@monaco-editor/react").then((mod) => mod.default),
+  async () => {
+    const [monacoReactModule, monacoModule] = await Promise.all([
+      import("@monaco-editor/react"),
+      import("monaco-editor")
+    ]);
+
+    monacoReactModule.loader.config({ monaco: monacoModule });
+
+    return monacoReactModule.default;
+  },
   {
     ssr: false,
     loading: () => (
