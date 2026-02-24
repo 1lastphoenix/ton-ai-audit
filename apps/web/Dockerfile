@@ -3,7 +3,8 @@ FROM node:22-alpine
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN rm -f /usr/local/bin/pnpm /usr/local/bin/pnpx \
+  && npm install -g pnpm@10.5.2
 
 # Create non-root user before installing dependencies.
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
