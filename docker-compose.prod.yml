@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ton_audit}
       POSTGRES_USER: ${POSTGRES_USER:-ton}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -136,7 +136,7 @@ services:
       - traefik.docker.network=${PROXY_NETWORK:-dokploy-network}
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-ton_audit}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
@@ -197,7 +197,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-ton_audit}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}

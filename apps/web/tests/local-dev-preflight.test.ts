@@ -29,6 +29,10 @@ const preflight = require("../../../scripts/local-dev-preflight.mjs") as {
   parseDotEnv: (content: string) => Record<string, string>;
   requiredEnvKeys: string[];
   resetNextDevArtifacts: (workspaceRoot?: string) => string[];
+  deriveDatabaseEnv: (
+    envObject: Record<string, string>,
+    options?: { host?: string; port?: string }
+  ) => Record<string, string>;
 };
 
 const {
@@ -44,7 +48,8 @@ const {
   parseDotEnv,
   requiredEnvKeys,
   localComposeServices,
-  resetNextDevArtifacts
+  resetNextDevArtifacts,
+  deriveDatabaseEnv
 } = preflight;
 
 describe("local dev preflight env helpers", () => {
@@ -64,6 +69,7 @@ MINIO_BUCKET=ton-audit
   it("flags missing and placeholder required env values", () => {
     const missing = findMissingRequiredEnv({
       DATABASE_URL: "postgresql://ton:ton@localhost:5432/ton_audit",
+      DB_PASSWORD: "replace-with-postgres-password",
       REDIS_URL: "redis://localhost:6379",
       MINIO_ENDPOINT: "http://localhost:9000",
       MINIO_REGION: "us-east-1",
@@ -77,7 +83,6 @@ MINIO_BUCKET=ton-audit
       OPENROUTER_EMBEDDINGS_MODEL: "openai/text-embedding-3-small",
       NEXT_PUBLIC_APP_URL: "http://localhost:3000",
       NEXT_PUBLIC_TON_LSP_WS_URL: "ws://localhost:3002",
-      POSTGRES_PASSWORD: "replace-with-postgres-password",
       MINIO_ROOT_USER: "minioadmin",
       MINIO_ROOT_PASSWORD: "replace-with-minio-root-password"
     });
@@ -88,15 +93,14 @@ MINIO_BUCKET=ton-audit
     expect(missing).toContain("GITHUB_CLIENT_ID");
     expect(missing).toContain("GITHUB_CLIENT_SECRET");
     expect(missing).toContain("OPENROUTER_API_KEY");
-    expect(missing).toContain("POSTGRES_PASSWORD");
+    expect(missing).toContain("DB_PASSWORD");
     expect(missing).toContain("MINIO_ROOT_PASSWORD");
-    expect(missing).not.toContain("DATABASE_URL");
   });
 
   it("keeps required key list stable", () => {
     expect(requiredEnvKeys).toEqual(
       expect.arrayContaining([
-        "DATABASE_URL",
+        "DB_PASSWORD",
         "REDIS_URL",
         "MINIO_ENDPOINT",
         "MINIO_ACCESS_KEY",
@@ -109,7 +113,6 @@ MINIO_BUCKET=ton-audit
         "OPENROUTER_EMBEDDINGS_MODEL",
         "NEXT_PUBLIC_APP_URL",
         "NEXT_PUBLIC_TON_LSP_WS_URL",
-        "POSTGRES_PASSWORD",
         "MINIO_ROOT_USER",
         "MINIO_ROOT_PASSWORD"
       ])
@@ -138,6 +141,29 @@ MINIO_BUCKET=ton-audit
 
     expect(buildEnv.NODE_ENV).toBe("production");
     expect(buildEnv.DATABASE_URL).toBe("postgresql://ton:ton@localhost:5432/ton_audit");
+  });
+
+  it("derives DATABASE_URL from DB_PASSWORD when DATABASE_URL is unset", () => {
+    const derived = deriveDatabaseEnv(
+      {
+        DB_PASSWORD: "top-secret",
+        POSTGRES_USER: "ton",
+        POSTGRES_DB: "ton_audit"
+      },
+      { host: "localhost", port: "5432" }
+    );
+
+    expect(derived.POSTGRES_PASSWORD).toBe("top-secret");
+    expect(derived.DATABASE_URL).toBe("postgresql://ton:top-secret@localhost:5432/ton_audit");
+  });
+
+  it("derives DB_PASSWORD from DATABASE_URL when DB_PASSWORD is unset", () => {
+    const derived = deriveDatabaseEnv({
+      DATABASE_URL: "postgresql://ton:derived-pass@localhost:5432/ton_audit"
+    });
+
+    expect(derived.DB_PASSWORD).toBe("derived-pass");
+    expect(derived.POSTGRES_PASSWORD).toBe("derived-pass");
   });
 
   it("keeps a single command to launch web and worker dev servers", () => {

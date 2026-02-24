@@ -47,6 +47,51 @@ function loadRootEnv(rootDir) {
   return {};
 }
 
+function hasNonEmptyValue(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function extractPasswordFromDatabaseUrl(databaseUrl) {
+  if (!hasNonEmptyValue(databaseUrl)) {
+    return "";
+  }
+
+  try {
+    const url = new URL(databaseUrl);
+    return decodeURIComponent(url.password ?? "");
+  } catch {
+    return "";
+  }
+}
+
+function deriveDatabaseEnv(envObject) {
+  const normalized = { ...envObject };
+  const user = normalized.POSTGRES_USER?.trim() || "ton";
+  const database = normalized.POSTGRES_DB?.trim() || "ton_audit";
+
+  if (!hasNonEmptyValue(normalized.DB_PASSWORD)) {
+    if (hasNonEmptyValue(normalized.POSTGRES_PASSWORD)) {
+      normalized.DB_PASSWORD = normalized.POSTGRES_PASSWORD.trim();
+    } else {
+      const fromUrl = extractPasswordFromDatabaseUrl(normalized.DATABASE_URL);
+      if (fromUrl) {
+        normalized.DB_PASSWORD = fromUrl;
+      }
+    }
+  }
+
+  if (!hasNonEmptyValue(normalized.POSTGRES_PASSWORD) && hasNonEmptyValue(normalized.DB_PASSWORD)) {
+    normalized.POSTGRES_PASSWORD = normalized.DB_PASSWORD.trim();
+  }
+
+  if (!hasNonEmptyValue(normalized.DATABASE_URL) && hasNonEmptyValue(normalized.DB_PASSWORD)) {
+    const encodedPassword = encodeURIComponent(normalized.DB_PASSWORD.trim());
+    normalized.DATABASE_URL = `postgresql://${user}:${encodedPassword}@localhost:5432/${database}`;
+  }
+
+  return normalized;
+}
+
 function parseCommandArgs(argv) {
   const separatorIndex = argv.indexOf("--");
   const args = separatorIndex >= 0 ? argv.slice(separatorIndex + 1) : argv;
@@ -64,7 +109,7 @@ const rootDir = path.resolve(scriptDir, "..");
 const commandArgs = parseCommandArgs(process.argv.slice(2));
 const command = commandArgs.join(" ");
 
-const envFromRoot = loadRootEnv(rootDir);
+const envFromRoot = deriveDatabaseEnv(loadRootEnv(rootDir));
 const child = spawn(command, {
   cwd: process.cwd(),
   stdio: "inherit",

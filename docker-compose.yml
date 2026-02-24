@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ton_audit}
       POSTGRES_USER: ${POSTGRES_USER:-ton}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ton}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ton}
     ports:
       - "5432:5432"
     volumes:

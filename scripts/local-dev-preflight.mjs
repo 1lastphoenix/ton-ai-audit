@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 export const requiredEnvKeys = [
-  "DATABASE_URL",
+  "DB_PASSWORD",
   "REDIS_URL",
   "MINIO_ENDPOINT",
   "MINIO_ACCESS_KEY",
@@ -20,7 +20,6 @@ export const requiredEnvKeys = [
   "OPENROUTER_EMBEDDINGS_MODEL",
   "NEXT_PUBLIC_APP_URL",
   "NEXT_PUBLIC_TON_LSP_WS_URL",
-  "POSTGRES_PASSWORD",
   "MINIO_ROOT_USER",
   "MINIO_ROOT_PASSWORD"
 ];
@@ -315,6 +314,53 @@ function trimTrailingSlash(value) {
   }
 
   return value.replace(/\/+$/, "");
+}
+
+function hasNonEmptyValue(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function extractPasswordFromDatabaseUrl(databaseUrl) {
+  if (!hasNonEmptyValue(databaseUrl)) {
+    return "";
+  }
+
+  try {
+    const url = new URL(databaseUrl);
+    return decodeURIComponent(url.password ?? "");
+  } catch {
+    return "";
+  }
+}
+
+export function deriveDatabaseEnv(envObject, options = {}) {
+  const normalized = { ...envObject };
+  const user = normalized.POSTGRES_USER?.trim() || "ton";
+  const database = normalized.POSTGRES_DB?.trim() || "ton_audit";
+  const host = options.host ?? "localhost";
+  const port = options.port ?? "5432";
+
+  if (!hasNonEmptyValue(normalized.DB_PASSWORD)) {
+    if (hasNonEmptyValue(normalized.POSTGRES_PASSWORD)) {
+      normalized.DB_PASSWORD = normalized.POSTGRES_PASSWORD.trim();
+    } else {
+      const passwordFromUrl = extractPasswordFromDatabaseUrl(normalized.DATABASE_URL);
+      if (passwordFromUrl) {
+        normalized.DB_PASSWORD = passwordFromUrl;
+      }
+    }
+  }
+
+  if (!hasNonEmptyValue(normalized.POSTGRES_PASSWORD) && hasNonEmptyValue(normalized.DB_PASSWORD)) {
+    normalized.POSTGRES_PASSWORD = normalized.DB_PASSWORD.trim();
+  }
+
+  if (!hasNonEmptyValue(normalized.DATABASE_URL) && hasNonEmptyValue(normalized.DB_PASSWORD)) {
+    const encodedPassword = encodeURIComponent(normalized.DB_PASSWORD.trim());
+    normalized.DATABASE_URL = `postgresql://${user}:${encodedPassword}@${host}:${port}/${database}`;
+  }
+
+  return normalized;
 }
 
 function toErrorMessage(error) {
@@ -687,7 +733,10 @@ export async function runLocalDevPreflight(options = {}) {
   const serve = options.serve === true;
   const quick = options.quick === true;
   const envFilePath = path.resolve(process.cwd(), envFile);
-  const envFromFile = loadEnvFile(envFilePath);
+  const envFromFile = deriveDatabaseEnv(loadEnvFile(envFilePath), {
+    host: "localhost",
+    port: "5432"
+  });
 
   const missingKeys = findMissingRequiredEnv(envFromFile);
   if (missingKeys.length > 0) {
