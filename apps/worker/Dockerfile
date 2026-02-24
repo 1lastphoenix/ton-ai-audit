@@ -4,6 +4,7 @@ ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 
 RUN corepack enable
+RUN npm install -g pnpm@10.5.2
 
 # Create non-root user before installing dependencies.
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
