@@ -42,9 +42,20 @@ const queues = {
   cleanup: new Queue<JobPayloadMap["cleanup"]>(queueNames.cleanup, { connection: redisConnection })
 } as const;
 
-const jobHeartbeatMsRaw = Number(process.env.WORKER_JOB_HEARTBEAT_MS ?? 15_000);
-const JOB_HEARTBEAT_INTERVAL_MS =
-  Number.isFinite(jobHeartbeatMsRaw) && jobHeartbeatMsRaw > 0 ? jobHeartbeatMsRaw : 15_000;
+function readIntegerEnv(name: string, fallback: number, minimum = 1) {
+  const raw = Number(process.env[name] ?? fallback);
+  if (!Number.isFinite(raw)) {
+    return fallback;
+  }
+
+  const normalized = Math.trunc(raw);
+  return normalized >= minimum ? normalized : fallback;
+}
+
+const JOB_HEARTBEAT_INTERVAL_MS = readIntegerEnv("WORKER_JOB_HEARTBEAT_MS", 15_000);
+const WORKER_LOCK_DURATION_MS = readIntegerEnv("WORKER_LOCK_DURATION_MS", 120_000);
+const WORKER_STALLED_INTERVAL_MS = readIntegerEnv("WORKER_STALLED_INTERVAL_MS", 60_000);
+const WORKER_MAX_STALLED_COUNT = readIntegerEnv("WORKER_MAX_STALLED_COUNT", 3, 0);
 
 function extractPayloadContext(payload: unknown) {
   if (!payload || typeof payload !== "object") {
@@ -265,7 +276,10 @@ function createWorker<Name extends JobStep>(
     },
     {
       connection: redisConnection,
-      concurrency
+      concurrency,
+      lockDuration: WORKER_LOCK_DURATION_MS,
+      stalledInterval: WORKER_STALLED_INTERVAL_MS,
+      maxStalledCount: WORKER_MAX_STALLED_COUNT
     }
   );
 }
@@ -454,4 +468,10 @@ healthServer.listen(healthPort, () => {
   workerLogger.info("health-server.listening", { port: healthPort });
 });
 
-workerLogger.info("workers.started", { workerCount: workers.length });
+workerLogger.info("workers.started", {
+  workerCount: workers.length,
+  workerHeartbeatIntervalMs: JOB_HEARTBEAT_INTERVAL_MS,
+  workerLockDurationMs: WORKER_LOCK_DURATION_MS,
+  workerStalledIntervalMs: WORKER_STALLED_INTERVAL_MS,
+  workerMaxStalledCount: WORKER_MAX_STALLED_COUNT
+});

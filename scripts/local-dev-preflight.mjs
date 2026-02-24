@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -173,6 +173,56 @@ function runCommand(command, envObject) {
     const details = [result.stderr?.trim(), result.stdout?.trim()].filter(Boolean).join("\n");
     throw new Error(details || `Command failed: ${command}`);
   }
+}
+
+async function runCommandStreaming(command, envObject) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, {
+      cwd: process.cwd(),
+      stdio: "inherit",
+      shell: true,
+      env: {
+        ...process.env,
+        ...envObject
+      }
+    });
+
+    const forwardSigint = () => {
+      child.kill("SIGINT");
+    };
+    const forwardSigterm = () => {
+      child.kill("SIGTERM");
+    };
+
+    process.once("SIGINT", forwardSigint);
+    process.once("SIGTERM", forwardSigterm);
+
+    const cleanup = () => {
+      process.off("SIGINT", forwardSigint);
+      process.off("SIGTERM", forwardSigterm);
+    };
+
+    child.on("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+
+    child.on("exit", (code, signal) => {
+      cleanup();
+
+      if (signal) {
+        reject(new Error(`Command terminated by signal ${signal}: ${command}`));
+        return;
+      }
+
+      if ((code ?? 1) !== 0) {
+        reject(new Error(`Command failed with exit code ${code}: ${command}`));
+        return;
+      }
+
+      resolve(undefined);
+    });
+  });
 }
 
 export function getServiceName(row) {
@@ -707,7 +757,7 @@ export async function runLocalDevPreflight(options = {}) {
     }
 
     const serveCommand = `pnpm --parallel ${filters.join(" ")} dev`;
-    runCommand(serveCommand, envFromFile);
+    await runCommandStreaming(serveCommand, envFromFile);
   }
 }
 

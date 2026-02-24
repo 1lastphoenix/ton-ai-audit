@@ -506,6 +506,55 @@ function toPdfStatusLabel(status: string) {
   }
 }
 
+function normalizeSeverity(severity: string) {
+  return severity.trim().toLowerCase();
+}
+
+function severityBadgeClass(severity: string) {
+  switch (normalizeSeverity(severity)) {
+    case "critical":
+      return "border-red-500/40 bg-red-500/10 text-red-300";
+    case "high":
+      return "border-orange-500/40 bg-orange-500/10 text-orange-300";
+    case "medium":
+      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    case "low":
+      return "border-sky-500/40 bg-sky-500/10 text-sky-300";
+    default:
+      return "border-border bg-muted text-muted-foreground";
+  }
+}
+
+function auditStatusBadgeClass(status: string) {
+  switch (status) {
+    case "running":
+      return "border-primary/40 bg-primary/10 text-primary";
+    case "completed":
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+    case "failed":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "queued":
+      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    default:
+      return "border-border bg-muted text-muted-foreground";
+  }
+}
+
+function pdfStatusBadgeClass(status: string) {
+  switch (status) {
+    case "completed":
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+    case "failed":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "running":
+      return "border-primary/40 bg-primary/10 text-primary";
+    case "queued":
+      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    default:
+      return "border-border bg-muted text-muted-foreground";
+  }
+}
+
 function workbenchLogLevelClass(level: WorkbenchLogLevel) {
   switch (level) {
     case "error":
@@ -623,6 +672,49 @@ function verifyProgressPhaseLabel(phase: VerifyProgressPhase) {
     default:
       return "Idle";
   }
+}
+
+function resolveLspWebSocketUrl(rawUrl?: string) {
+  const fallback = "ws://localhost:3002";
+  const configuredUrl = rawUrl?.trim() || fallback;
+
+  if (typeof window === "undefined") {
+    return configuredUrl;
+  }
+
+  try {
+    const parsed = new URL(configuredUrl);
+
+    if (window.location.protocol === "https:" && parsed.protocol === "ws:") {
+      parsed.protocol = "wss:";
+    }
+
+    return parsed.toString();
+  } catch {
+    return configuredUrl;
+  }
+}
+
+function buildLspWebSocketUrls(rawUrl?: string) {
+  const primary = resolveLspWebSocketUrl(rawUrl);
+  const candidates = [primary];
+
+  try {
+    const parsed = new URL(primary);
+    if (parsed.hostname === "localhost") {
+      const fallback = new URL(primary);
+      fallback.hostname = "127.0.0.1";
+      candidates.push(fallback.toString());
+    } else if (parsed.hostname === "127.0.0.1") {
+      const fallback = new URL(primary);
+      fallback.hostname = "localhost";
+      candidates.push(fallback.toString());
+    }
+  } catch {
+    // Keep primary URL only when parsing fails.
+  }
+
+  return [...new Set(candidates)];
 }
 
 function collectDirectoryPaths(nodes: TreeNode[]): string[] {
@@ -831,6 +923,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [jobState, setJobState] = useState<string>("idle");
   const [auditStatus, setAuditStatus] = useState<string>("idle");
   const [lspStatus, setLspStatus] = useState<TonLspStatus>("idle");
+  const [lspErrorDetail, setLspErrorDetail] = useState<string | null>(null);
   const [activityMessage, setActivityMessage] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [bottomPanelTab, setBottomPanelTab] = useState<"audit-log" | "problems">("audit-log");
@@ -932,7 +1025,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [expandedDirectorySet, explorerQuery, filteredTree]);
   const lspProblemMessage = useMemo(() => {
     if (lspStatus === "error") {
-      return "LSP connection failed. Language diagnostics and completions are unavailable.";
+      return lspErrorDetail
+        ? `LSP connection failed: ${lspErrorDetail}`
+        : "LSP connection failed. Language diagnostics and completions are unavailable.";
     }
 
     if (lspStatus === "disconnected") {
@@ -940,7 +1035,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     return null;
-  }, [lspStatus]);
+  }, [lspErrorDetail, lspStatus]);
   const problemItems = useMemo(() => {
     const items: string[] = [];
     if (lastError) {
@@ -1806,9 +1901,18 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     });
 
     if (!lspClientRef.current) {
+      const wsUrls = buildLspWebSocketUrls(process.env.NEXT_PUBLIC_TON_LSP_WS_URL);
       lspClientRef.current = startTonLspClient({
-        wsUrl: process.env.NEXT_PUBLIC_TON_LSP_WS_URL ?? "ws://localhost:3002",
-        onStatus: setLspStatus
+        wsUrls,
+        onStatus: (status) => {
+          setLspStatus(status);
+          if (status === "connected") {
+            setLspErrorDetail(null);
+          }
+        },
+        onError: (message) => {
+          setLspErrorDetail(message);
+        }
       });
     }
   };

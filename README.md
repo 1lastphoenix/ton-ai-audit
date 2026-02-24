@@ -26,7 +26,7 @@ Self-hosted TON smart-contract audit platform with:
 - launches web + worker dev servers on host
 
 Optional infra-only mode:
-- Start infra services only: `docker compose -f infra/docker-compose.yml up -d --build`
+- Start infra services only: `docker compose -f docker-compose.yml up -d --build postgres redis minio minio-init sandbox-runner lsp-service`
 - Run apps on host: `pnpm dev:web` and `pnpm dev:worker`
 
 One-liner full local verification:

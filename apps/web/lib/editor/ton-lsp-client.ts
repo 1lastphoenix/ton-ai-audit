@@ -114,8 +114,10 @@ export function registerTonLanguages(monaco: typeof Monaco) {
 }
 
 export function startTonLspClient(params: {
-  wsUrl: string;
+  wsUrl?: string;
+  wsUrls?: string[];
   onStatus: (status: TonLspStatus) => void;
+  onError?: (message: string) => void;
 }) {
   type TonLanguageClient = {
     isRunning?: () => boolean;
@@ -123,10 +125,35 @@ export function startTonLspClient(params: {
     stop: (timeout?: number) => Promise<void>;
   };
 
-  const webSocket = new WebSocket(params.wsUrl);
+  let webSocket: WebSocket | null = null;
   let languageClient: TonLanguageClient | null = null;
   let disposed = false;
-  let hasError = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempt = 0;
+  const wsCandidates = (
+    params.wsUrls?.length ? params.wsUrls : [params.wsUrl ?? "ws://localhost:3002"]
+  )
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, array) => array.indexOf(value) === index);
+  let wsCandidateIndex = 0;
+
+  const currentWsUrl = () => wsCandidates[wsCandidateIndex] ?? "ws://localhost:3002";
+  const rotateWsCandidate = () => {
+    if (wsCandidates.length <= 1) {
+      return;
+    }
+
+    wsCandidateIndex = (wsCandidateIndex + 1) % wsCandidates.length;
+  };
+
+  const clearReconnectTimer = () => {
+    if (!reconnectTimer) {
+      return;
+    }
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  };
 
   params.onStatus("connecting");
 
@@ -134,12 +161,36 @@ export function startTonLspClient(params: {
     if (disposed) {
       return;
     }
+    params.onStatus(status);
+  };
 
-    if (status === "error") {
-      hasError = true;
+  const reportError = (message: string, error?: unknown) => {
+    if (disposed) {
+      return;
     }
 
-    params.onStatus(status);
+    params.onError?.(message);
+    if (error) {
+      console.warn("[ton-lsp-client]", message, error);
+    }
+    setStatus("error");
+  };
+
+  const scheduleReconnect = () => {
+    if (disposed || reconnectTimer) {
+      return;
+    }
+
+    reconnectAttempt += 1;
+    const backoffMs = Math.min(10_000, 500 * 2 ** Math.min(reconnectAttempt - 1, 5));
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (disposed) {
+        return;
+      }
+      setStatus("connecting");
+      connect();
+    }, backoffMs);
   };
 
   const stopClient = async () => {
@@ -158,7 +209,17 @@ export function startTonLspClient(params: {
     }
   };
 
-  webSocket.addEventListener("open", () => {
+  const connect = () => {
+    const wsUrl = currentWsUrl();
+    const socket = new WebSocket(wsUrl);
+    webSocket = socket;
+    let opened = false;
+
+    socket.addEventListener("open", () => {
+      opened = true;
+      clearReconnectTimer();
+      reconnectAttempt = 0;
+
     void (async () => {
       if (disposed) {
         return;
@@ -180,9 +241,9 @@ export function startTonLspClient(params: {
         }
 
         const { toSocket, WebSocketMessageReader, WebSocketMessageWriter } = wsJsonRpc;
-        const socket = toSocket(webSocket);
-        const reader = new WebSocketMessageReader(socket);
-        const writer = new WebSocketMessageWriter(socket);
+        const lspSocket = toSocket(socket);
+        const reader = new WebSocketMessageReader(lspSocket);
+        const writer = new WebSocketMessageWriter(lspSocket);
 
         const client = new MonacoLanguageClient({
           id: "ton-language-server",
@@ -215,39 +276,55 @@ export function startTonLspClient(params: {
 
         reader.onClose(async () => {
           await stopClient();
-          if (!disposed && !hasError) {
+          if (!disposed) {
             params.onStatus("disconnected");
+            scheduleReconnect();
           }
         });
 
         await client.start();
         setStatus("connected");
-      } catch {
-        setStatus("error");
+      } catch (error) {
+        reportError("Failed to initialize TON LSP client.", error);
         await stopClient();
-        if (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING) {
-          webSocket.close();
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.close();
         }
+        scheduleReconnect();
       }
     })();
-  });
+    });
 
-  webSocket.addEventListener("error", () => {
-    setStatus("error");
-  });
+    socket.addEventListener("error", (event) => {
+      if (!opened) {
+        rotateWsCandidate();
+      }
+      reportError(`TON LSP WebSocket connection error (${wsUrl}).`, event);
+    });
 
-  webSocket.addEventListener("close", async () => {
-    await stopClient();
-    if (!disposed && !hasError) {
-      params.onStatus("disconnected");
-    }
-  });
+    socket.addEventListener("close", async () => {
+      await stopClient();
+      if (!disposed) {
+        if (!opened) {
+          rotateWsCandidate();
+        }
+        params.onStatus("disconnected");
+        scheduleReconnect();
+      }
+    });
+  };
+
+  connect();
 
   return {
     dispose: async () => {
       disposed = true;
+      clearReconnectTimer();
       await stopClient();
-      if (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING) {
+      if (
+        webSocket &&
+        (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING)
+      ) {
         webSocket.close();
       }
       params.onStatus("disconnected");
