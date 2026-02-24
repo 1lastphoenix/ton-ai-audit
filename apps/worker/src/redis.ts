@@ -4,7 +4,7 @@ import { env } from "./env";
 
 const redisUrl = new URL(env.REDIS_URL);
 
-const redisOptions: RedisOptions = {
+export const bullMqConnectionOptions: RedisOptions = {
   host: redisUrl.hostname,
   port: Number(redisUrl.port || 6379),
   username: redisUrl.username || undefined,
@@ -14,4 +14,11 @@ const redisOptions: RedisOptions = {
   lazyConnect: false
 };
 
-export const redisConnection = new IORedis(redisOptions);
+export function createRedisConnection(overrides?: RedisOptions) {
+  return new IORedis({
+    ...bullMqConnectionOptions,
+    ...overrides
+  });
+}
+
+export const redisConnection = createRedisConnection();

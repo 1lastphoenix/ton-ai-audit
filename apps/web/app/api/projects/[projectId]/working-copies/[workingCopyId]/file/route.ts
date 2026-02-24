@@ -3,7 +3,12 @@ import { NextResponse } from "next/server";
 import { workingCopyPatchFileSchema } from "@ton-audit/shared";
 
 import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
-import { ensureProjectAccess, ensureWorkingCopyAccess, saveWorkingCopyFile } from "@/lib/server/domain";
+import {
+  ensureProjectAccess,
+  ensureWorkingCopyAccess,
+  findActiveAuditRun,
+  saveWorkingCopyFile
+} from "@/lib/server/domain";
 
 export async function PATCH(
   request: Request,
@@ -21,6 +26,17 @@ export async function PATCH(
     const workingCopy = await ensureWorkingCopyAccess(workingCopyId, session.user.id, projectId);
     if (!workingCopy) {
       return NextResponse.json({ error: "Working copy not found" }, { status: 404 });
+    }
+
+    const activeAuditRun = await findActiveAuditRun(projectId);
+    if (activeAuditRun) {
+      return NextResponse.json(
+        {
+          error: "Cannot modify files while an audit is running for this project.",
+          activeAuditRunId: activeAuditRun.id
+        },
+        { status: 409 }
+      );
     }
 
     const body = await parseJsonBody(request, workingCopyPatchFileSchema);

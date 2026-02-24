@@ -3,7 +3,11 @@ import { NextResponse } from "next/server";
 import { runAuditSchema } from "@ton-audit/shared";
 
 import { checkRateLimit, parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
-import { ensureProjectAccess, snapshotWorkingCopyAndCreateAuditRun } from "@/lib/server/domain";
+import {
+  ensureProjectAccess,
+  findActiveAuditRun,
+  snapshotWorkingCopyAndCreateAuditRun
+} from "@/lib/server/domain";
 import { assertAllowedModel, getAuditModelAllowlist } from "@/lib/server/model-allowlist";
 import { enqueueJob } from "@/lib/server/queues";
 
@@ -27,6 +31,17 @@ export async function POST(
       return NextResponse.json(
         {
           error: `Audit requests are not allowed while project state is '${project.lifecycleState}'.`
+        },
+        { status: 409 }
+      );
+    }
+
+    const activeAuditRun = await findActiveAuditRun(projectId);
+    if (activeAuditRun) {
+      return NextResponse.json(
+        {
+          error: "An audit is already running for this project.",
+          activeAuditRunId: activeAuditRun.id
         },
         { status: 409 }
       );

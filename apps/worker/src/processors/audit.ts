@@ -304,6 +304,41 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           prompt
         });
 
+      const runModelWithRetry = async (modelId: string, stage: "primary" | "fallback") => {
+        const maxAttempts = 2;
+        let lastError: unknown = null;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          try {
+            if (attempt > 1) {
+              workerLogger.info("audit.stage.model-retry-attempt", {
+                ...context,
+                stage,
+                modelId,
+                attempt
+              });
+            }
+
+            return await tryModel(modelId);
+          } catch (error) {
+            lastError = error;
+            workerLogger.warn("audit.stage.model-attempt-failed", {
+              ...context,
+              stage,
+              modelId,
+              attempt,
+              error
+            });
+
+            if (attempt < maxAttempts) {
+              await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
+            }
+          }
+        }
+
+        throw (lastError instanceof Error ? lastError : new Error("Model invocation failed"));
+      };
+
       let modelResult: Awaited<ReturnType<typeof tryModel>>;
       let usedModel = auditRun.primaryModelId;
 
@@ -313,7 +348,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
       });
 
       try {
-        modelResult = await tryModel(auditRun.primaryModelId);
+        modelResult = await runModelWithRetry(auditRun.primaryModelId, "primary");
         workerLogger.info("audit.stage.model-primary-completed", {
           ...context,
           modelId: auditRun.primaryModelId
@@ -331,7 +366,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           modelId: auditRun.fallbackModelId
         });
 
-        modelResult = await tryModel(auditRun.fallbackModelId);
+        modelResult = await runModelWithRetry(auditRun.fallbackModelId, "fallback");
         workerLogger.info("audit.stage.model-fallback-completed", {
           ...context,
           modelId: auditRun.fallbackModelId

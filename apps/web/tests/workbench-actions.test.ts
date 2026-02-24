@@ -55,4 +55,34 @@ describe("ton workbench actions", () => {
     expect(source).toContain("/api/jobs/${encodeURIComponent(jobId)}/events?projectId=${projectId}");
     expect(source).toContain("setActiveJobIds");
   });
+
+  it("locks editing actions while audit is queued or running", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("isAuditWriteLocked");
+    expect(source).toContain("readOnly: !isEditable || isAuditWriteLocked");
+    expect(source).toContain("Editing is disabled while an audit is queued or running.");
+  });
+
+  it("renders verify per-step progress from SSE verify events", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("event === \"progress\"");
+    expect(source).toContain("event === \"sandbox-step\"");
+    expect(source).toContain("verifyProgressPhaseLabel");
+    expect(source).toContain("Current:");
+  });
+
+  it("loads audit history, compares completed audits, and exports PDF per selected audit row", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("/api/projects/${projectId}/audits");
+    expect(source).toContain("/api/projects/${projectId}/audits/compare?");
+    expect(source).toContain("Audit History");
+    expect(source).toContain("exportPdfForAudit");
+    expect(source).toContain("void exportPdfForAudit(item.id)");
+  });
 });

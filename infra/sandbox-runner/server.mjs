@@ -376,22 +376,58 @@ async function executeStep(step, workspaceDir, metadata) {
   };
 }
 
-async function executeSteps(validPayload, workspaceDir) {
+async function executeSteps(validPayload, workspaceDir, onProgress) {
   const results = [];
-  for (const step of validPayload.steps) {
+  const totalSteps = validPayload.steps.length;
+
+  for (const [index, step] of validPayload.steps.entries()) {
+    await onProgress({
+      type: "step-started",
+      index: index + 1,
+      totalSteps,
+      step: {
+        id: step.id,
+        action: step.action,
+        optional: Boolean(step.optional),
+        timeoutMs: step.timeoutMs,
+        status: "running"
+      }
+    });
+
     const result = await executeStep(step, workspaceDir, validPayload.metadata);
     const shouldSkipFailure = result.status !== "completed" && step.optional;
 
     if (shouldSkipFailure) {
-      results.push({
+      const skippedResult = {
         ...result,
         status: "skipped",
         stderr: result.stderr || "Optional step failed and was skipped."
+      };
+      results.push(skippedResult);
+      await onProgress({
+        type: "step-finished",
+        index: index + 1,
+        totalSteps,
+        step: {
+          ...skippedResult,
+          optional: Boolean(step.optional),
+          timeoutMs: step.timeoutMs
+        }
       });
       continue;
     }
 
     results.push(result);
+    await onProgress({
+      type: "step-finished",
+      index: index + 1,
+      totalSteps,
+      step: {
+        ...result,
+        optional: Boolean(step.optional),
+        timeoutMs: step.timeoutMs
+      }
+    });
 
     if (result.status === "failed" || result.status === "timeout") {
       break;
@@ -406,6 +442,19 @@ function writeJson(response, statusCode, payload) {
     "Content-Type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(payload));
+}
+
+function writeNdjson(response, payload) {
+  response.write(`${JSON.stringify(payload)}\n`);
+}
+
+function isStreamProgressRequested(request) {
+  const headerValue = request.headers["x-sandbox-stream"];
+  if (Array.isArray(headerValue)) {
+    return headerValue.some((item) => String(item).trim() === "1");
+  }
+
+  return String(headerValue ?? "").trim() === "1";
 }
 
 const server = http.createServer(async (request, response) => {
@@ -424,14 +473,55 @@ const server = http.createServer(async (request, response) => {
   }
 
   let workspaceDir = null;
+  let streamStarted = false;
   try {
     const rawBody = await readBody(request);
     const payload = JSON.parse(rawBody);
     const validPayload = validateRequest(payload);
     const materialized = await materializeWorkspace(validPayload.files);
     workspaceDir = materialized.workspaceDir;
+    const streamProgress = isStreamProgressRequested(request);
+    const totalSteps = validPayload.steps.length;
 
-    const results = await executeSteps(validPayload, workspaceDir);
+    if (streamProgress) {
+      streamStarted = true;
+      response.writeHead(200, {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive"
+      });
+      writeNdjson(response, {
+        type: "started",
+        workspaceId: materialized.workspaceId,
+        mode: EXECUTION_MODE,
+        totalSteps,
+        steps: validPayload.steps.map((step) => ({
+          id: step.id,
+          action: step.action,
+          optional: Boolean(step.optional),
+          timeoutMs: step.timeoutMs
+        }))
+      });
+    }
+
+    const results = await executeSteps(validPayload, workspaceDir, async (eventPayload) => {
+      if (!streamProgress) {
+        return;
+      }
+      writeNdjson(response, eventPayload);
+    });
+
+    if (streamProgress) {
+      writeNdjson(response, {
+        type: "completed",
+        workspaceId: materialized.workspaceId,
+        mode: EXECUTION_MODE,
+        totalSteps,
+        results
+      });
+      response.end();
+      return;
+    }
 
     writeJson(response, 200, {
       workspaceId: materialized.workspaceId,
@@ -439,6 +529,15 @@ const server = http.createServer(async (request, response) => {
       results
     });
   } catch (error) {
+    if (streamStarted) {
+      writeNdjson(response, {
+        type: "error",
+        message: error instanceof Error ? error.message : "Unknown sandbox error"
+      });
+      response.end();
+      return;
+    }
+
     writeJson(response, 400, {
       error: error instanceof Error ? error.message : "Unknown sandbox error"
     });

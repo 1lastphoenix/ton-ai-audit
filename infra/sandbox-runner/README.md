@@ -15,6 +15,10 @@ Isolated execution service for TON verification steps.
 
 Free-form shell commands are intentionally not accepted.
 
+Progress streaming:
+- Set request header `x-sandbox-stream: 1` to receive line-delimited JSON (`application/x-ndjson`).
+- Stream events include `started`, `step-started`, `step-finished`, `completed`, and `error`.
+
 ## Security Model
 
 - Unsafe paths rejected (`..`, absolute paths, null bytes)

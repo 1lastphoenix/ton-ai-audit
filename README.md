@@ -15,9 +15,15 @@ Self-hosted TON smart-contract audit platform with:
 
 1. Copy `.env.example` to `.env` and fill OAuth/OpenRouter keys.
 2. Install dependencies: `pnpm install`.
-3. Start full local stack (web + worker + infra): `docker compose up -d --build`.
-4. Run DB migrations: `pnpm db:migrate`.
-5. Open `http://localhost:3000`.
+3. Start local dev (infra + migrations + web + worker): `pnpm dev`.
+4. Open `http://localhost:3000`.
+
+`pnpm dev` uses a quick bootstrap path:
+- validates env and local compose config
+- starts/repairs local infra stack if needed
+- runs DB migrations (with one recovery retry)
+- waits for sandbox/LSP readiness
+- launches web + worker dev servers on host
 
 Optional infra-only mode:
 - Start infra services only: `docker compose -f infra/docker-compose.yml up -d --build`

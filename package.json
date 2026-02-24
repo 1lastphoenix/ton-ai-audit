@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.5.2",
   "scripts": {
-    "dev": "pnpm --filter @ton-audit/web dev",
+    "dev": "node scripts/local-dev-preflight.mjs --serve --quick",
     "dev:web": "pnpm --filter @ton-audit/web dev",
     "dev:worker": "pnpm --filter @ton-audit/worker dev",
     "dev:test:all": "node scripts/local-dev-preflight.mjs --serve",

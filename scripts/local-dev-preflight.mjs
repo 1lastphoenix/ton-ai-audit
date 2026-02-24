@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 export const requiredEnvKeys = [
@@ -34,6 +35,46 @@ export const localComposeServices = [
   "sandbox-runner",
   "lsp-service"
 ];
+
+function getWorkspaceRequireCandidates() {
+  const candidates = [
+    path.resolve(process.cwd(), "apps", "web", "package.json"),
+    path.resolve(process.cwd(), "apps", "worker", "package.json"),
+    path.resolve(process.cwd(), "package.json")
+  ];
+
+  return candidates.filter((candidate) => fs.existsSync(candidate));
+}
+
+function canResolveWorkspaceModule(moduleId) {
+  for (const entrypoint of getWorkspaceRequireCandidates()) {
+    try {
+      const requireFromWorkspace = createRequire(entrypoint);
+      requireFromWorkspace.resolve(moduleId);
+      return true;
+    } catch {
+      // continue trying next workspace package
+    }
+  }
+
+  return false;
+}
+
+function loadWorkspaceModule(moduleId) {
+  for (const entrypoint of getWorkspaceRequireCandidates()) {
+    try {
+      const requireFromWorkspace = createRequire(entrypoint);
+      return requireFromWorkspace(moduleId);
+    } catch {
+      // continue trying next workspace package
+    }
+  }
+
+  throw new Error(
+    `Cannot resolve ${moduleId} from workspace packages. ` +
+      `Run "pnpm install --frozen-lockfile" and retry.`
+  );
+}
 
 export function parseDotEnv(content) {
   const parsed = {};
@@ -252,7 +293,7 @@ export async function validateMinioCredentials(
 
   const { S3Client, HeadBucketCommand } = deps.awsSdk
     ? deps.awsSdk
-    : await import("@aws-sdk/client-s3");
+    : loadWorkspaceModule("@aws-sdk/client-s3");
 
   const client = deps.createClient
     ? deps.createClient({
@@ -444,6 +485,7 @@ async function waitForTonLspReady(url = "http://localhost:3002/health", timeoutM
 function parseCliArgs(argv) {
   const envFlagIndex = argv.indexOf("--env-file");
   const serve = argv.includes("--serve");
+  const quick = argv.includes("--quick");
 
   if (envFlagIndex >= 0) {
     const value = argv[envFlagIndex + 1];
@@ -452,19 +494,22 @@ function parseCliArgs(argv) {
     }
     return {
       envFile: value,
-      serve
+      serve,
+      quick
     };
   }
 
   return {
     envFile: ".env.local",
-    serve
+    serve,
+    quick
   };
 }
 
 export async function runLocalDevPreflight(options = {}) {
   const envFile = options.envFile ?? ".env.local";
   const serve = options.serve === true;
+  const quick = options.quick === true;
   const envFilePath = path.resolve(process.cwd(), envFile);
   const envFromFile = loadEnvFile(envFilePath);
 
@@ -479,11 +524,19 @@ export async function runLocalDevPreflight(options = {}) {
     process.env[key] = value;
   }
 
-  runCommand("pnpm install --frozen-lockfile", envFromFile);
+  const dependenciesReady =
+    canResolveWorkspaceModule("next/package.json") &&
+    canResolveWorkspaceModule("@aws-sdk/client-s3");
+
+  if (!quick || !dependenciesReady) {
+    runCommand("pnpm install --frozen-lockfile", envFromFile);
+  }
   runCommandCapture(`docker compose --env-file "${envFile}" -f docker-compose.yml config`, envFromFile);
-  runCommandCapture(`docker compose --env-file "${envFile}" -f docker-compose.prod.yml config`, envFromFile);
-  runCommand("docker build -f apps/web/Dockerfile -t ton-audit-web:local-preflight .", envFromFile);
-  runCommand("docker build -f apps/worker/Dockerfile -t ton-audit-worker:local-preflight .", envFromFile);
+  if (!quick) {
+    runCommandCapture(`docker compose --env-file "${envFile}" -f docker-compose.prod.yml config`, envFromFile);
+    runCommand("docker build -f apps/web/Dockerfile -t ton-audit-web:local-preflight .", envFromFile);
+    runCommand("docker build -f apps/worker/Dockerfile -t ton-audit-worker:local-preflight .", envFromFile);
+  }
 
   const stackRows = getLocalStackRows(envFile, envFromFile);
   if (shouldStartLocalStack(stackRows)) {
@@ -519,14 +572,20 @@ export async function runLocalDevPreflight(options = {}) {
   await waitForHttpOk("http://localhost:3003/health");
   await waitForTonLspReady("http://localhost:3002/health");
 
-  runCommand("pnpm lint", envFromFile);
-  runCommand("pnpm typecheck", envFromFile);
-  runCommand("pnpm test", envFromFile);
-  runCommand("pnpm build", getBuildEnv(envFromFile));
+  if (!quick) {
+    runCommand("pnpm lint", envFromFile);
+    runCommand("pnpm typecheck", envFromFile);
+    runCommand("pnpm test", envFromFile);
+    runCommand("pnpm build", getBuildEnv(envFromFile));
+  }
 
   if (serve) {
     // eslint-disable-next-line no-console
-    console.log("Preflight passed. Launching web + worker dev servers...");
+    console.log(
+      quick
+        ? "Quick dev bootstrap passed. Launching web + worker dev servers..."
+        : "Preflight passed. Launching web + worker dev servers..."
+    );
     runCommand(devServeCommand, envFromFile);
   }
 }

@@ -23,6 +23,23 @@ type Diagnostic = {
   level: "error" | "warning" | "info";
 };
 
+type VerifyProgressStepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "timeout";
+
+type VerifyProgressStepPayload = {
+  id: string;
+  action: string;
+  status: VerifyProgressStepStatus;
+  optional: boolean;
+  timeoutMs: number;
+  durationMs?: number;
+};
+
 function collectDeterministicDiagnostics(files: Awaited<ReturnType<typeof loadRevisionFilesWithContent>>) {
   const diagnostics: Diagnostic[] = [];
 
@@ -134,6 +151,13 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           content: file.content
         }))
       );
+      const plannedProgressSteps: VerifyProgressStepPayload[] = plan.steps.map((step) => ({
+        id: step.id,
+        action: step.action,
+        status: "pending",
+        optional: Boolean(step.optional),
+        timeoutMs: step.timeoutMs
+      }));
 
       workerLogger.info("verify.stage.inputs-loaded", {
         ...context,
@@ -144,13 +168,69 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         diagnosticsCount: diagnostics.length
       });
 
+      await recordJobEvent({
+        projectId: job.data.projectId,
+        queue: "verify",
+        jobId: String(job.id),
+        event: "progress",
+        payload: {
+          auditRunId: auditRun.id,
+          phase: "plan-ready",
+          toolchain,
+          sandboxAdapter: plan.adapter,
+          totalSteps: plannedProgressSteps.length,
+          steps: plannedProgressSteps
+        }
+      });
+
       let sandboxExecutionSummary = "Sandbox execution skipped";
       let sandboxResults: Awaited<ReturnType<typeof executeSandboxPlan>>["results"] = [];
 
       if (plan.steps.length > 0) {
+        const liveProgressSteps = plannedProgressSteps.map((step) => ({
+          ...step
+        }));
+        const snapshotLiveProgressSteps = () =>
+          liveProgressSteps.map((step) => ({
+            ...step
+          }));
+        const upsertLiveProgressStep = (step: VerifyProgressStepPayload) => {
+          const existingIndex = liveProgressSteps.findIndex((item) => item.id === step.id);
+          const mergedStep =
+            existingIndex >= 0
+              ? {
+                  ...liveProgressSteps[existingIndex],
+                  ...step
+                }
+              : step;
+
+          if (existingIndex >= 0) {
+            liveProgressSteps[existingIndex] = mergedStep;
+          } else {
+            liveProgressSteps.push(mergedStep);
+          }
+
+          return mergedStep;
+        };
+
         workerLogger.info("verify.stage.sandbox-starting", {
           ...context,
           sandboxStepCount: plan.steps.length
+        });
+        await recordJobEvent({
+          projectId: job.data.projectId,
+          queue: "verify",
+          jobId: String(job.id),
+          event: "progress",
+          payload: {
+            auditRunId: auditRun.id,
+            phase: "sandbox-running",
+            toolchain,
+            sandboxAdapter: plan.adapter,
+            totalSteps: liveProgressSteps.length,
+            currentStepId: null,
+            steps: snapshotLiveProgressSteps()
+          }
         });
 
         try {
@@ -158,11 +238,88 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             files: files.map((file) => ({ path: file.path, content: file.content })),
             plan,
             projectId: job.data.projectId,
-            revisionId: job.data.revisionId
+            revisionId: job.data.revisionId,
+            onProgress: async (event) => {
+              if (event.type === "started") {
+                if (event.steps.length) {
+                  for (const step of event.steps) {
+                    const existingStep = liveProgressSteps.find((item) => item.id === step.id);
+                    if (existingStep && existingStep.status !== "pending") {
+                      continue;
+                    }
+                    upsertLiveProgressStep({
+                      id: step.id,
+                      action: step.action,
+                      status: "pending",
+                      optional: Boolean(step.optional),
+                      timeoutMs: step.timeoutMs
+                    });
+                  }
+                }
+
+                await recordJobEvent({
+                  projectId: job.data.projectId,
+                  queue: "verify",
+                  jobId: String(job.id),
+                  event: "progress",
+                  payload: {
+                    auditRunId: auditRun.id,
+                    phase: "sandbox-running",
+                    toolchain,
+                    sandboxAdapter: plan.adapter,
+                    mode: event.mode,
+                    totalSteps: event.totalSteps,
+                    currentStepId: null,
+                    steps: snapshotLiveProgressSteps()
+                  }
+                });
+                return;
+              }
+
+              if (event.type === "step-started" || event.type === "step-finished") {
+                const nextStep: VerifyProgressStepPayload = {
+                  id: event.step.id,
+                  action: event.step.action,
+                  status: event.step.status,
+                  optional: Boolean(event.step.optional),
+                  timeoutMs: event.step.timeoutMs
+                };
+                if (typeof event.step.durationMs === "number") {
+                  nextStep.durationMs = event.step.durationMs;
+                }
+                const liveStep = upsertLiveProgressStep(nextStep);
+
+                await recordJobEvent({
+                  projectId: job.data.projectId,
+                  queue: "verify",
+                  jobId: String(job.id),
+                  event: "sandbox-step",
+                  payload: {
+                    auditRunId: auditRun.id,
+                    step: liveStep,
+                    index: event.index,
+                    totalSteps: event.totalSteps
+                  }
+                });
+                return;
+              }
+            }
           });
 
           sandboxResults = execution.results;
           const summary = summarizeSandboxResults(execution.results);
+          for (const stepResult of execution.results) {
+            const knownStep = liveProgressSteps.find((item) => item.id === stepResult.id);
+            upsertLiveProgressStep({
+              id: stepResult.id,
+              action: stepResult.action,
+              status: stepResult.status,
+              optional: knownStep?.optional ?? false,
+              timeoutMs: knownStep?.timeoutMs ?? 0,
+              durationMs: stepResult.durationMs
+            });
+          }
+          const finalizedProgressSteps = snapshotLiveProgressSteps();
           sandboxExecutionSummary = [
             `Sandbox mode: ${execution.mode}`,
             `Adapter: ${plan.adapter}`,
@@ -180,6 +337,25 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             sandboxSkipped: summary.skipped,
             sandboxTimeout: summary.timeout
           });
+          await recordJobEvent({
+            projectId: job.data.projectId,
+            queue: "verify",
+            jobId: String(job.id),
+            event: "progress",
+            payload: {
+              auditRunId: auditRun.id,
+              phase: "sandbox-completed",
+              toolchain,
+              sandboxAdapter: plan.adapter,
+              mode: execution.mode,
+              totalSteps: finalizedProgressSteps.length,
+              completed: summary.completed,
+              failed: summary.failed,
+              skipped: summary.skipped,
+              timeout: summary.timeout,
+              steps: finalizedProgressSteps
+            }
+          });
         } catch (sandboxError) {
           sandboxExecutionSummary = `Sandbox execution unavailable: ${
             sandboxError instanceof Error ? sandboxError.message : "Unknown error"
@@ -189,7 +365,37 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             ...context,
             error: sandboxError
           });
+          await recordJobEvent({
+            projectId: job.data.projectId,
+            queue: "verify",
+            jobId: String(job.id),
+            event: "progress",
+            payload: {
+              auditRunId: auditRun.id,
+              phase: "sandbox-failed",
+              toolchain,
+              sandboxAdapter: plan.adapter,
+              totalSteps: liveProgressSteps.length,
+              message: sandboxError instanceof Error ? sandboxError.message : "Unknown sandbox error",
+              steps: snapshotLiveProgressSteps()
+            }
+          });
         }
+      } else {
+        await recordJobEvent({
+          projectId: job.data.projectId,
+          queue: "verify",
+          jobId: String(job.id),
+          event: "progress",
+          payload: {
+            auditRunId: auditRun.id,
+            phase: "sandbox-skipped",
+            toolchain,
+            sandboxAdapter: plan.adapter,
+            totalSteps: 0,
+            steps: []
+          }
+        });
       }
 
       const stdout = [

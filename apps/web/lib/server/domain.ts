@@ -4,6 +4,7 @@ import {
   and,
   desc,
   eq,
+  inArray,
   ne,
   sql
 } from "drizzle-orm";
@@ -13,6 +14,8 @@ import {
   detectLanguageFromPath,
   normalizePath,
   projectLifecycleStateSchema,
+  type PdfExportStatus,
+  type RevisionSource,
   type Language,
   type ProjectLifecycleState,
   projects,
@@ -24,6 +27,7 @@ import {
   workingCopyFiles,
   fileBlobs,
   auditRuns,
+  findingInstances,
   findingTransitions,
   pdfExports
 } from "@ton-audit/shared";
@@ -691,6 +695,13 @@ export async function findAuditRunWithProject(projectId: string, auditRunId: str
   });
 }
 
+export async function findActiveAuditRun(projectId: string) {
+  return db.query.auditRuns.findFirst({
+    where: and(eq(auditRuns.projectId, projectId), inArray(auditRuns.status, ["queued", "running"])),
+    orderBy: desc(auditRuns.createdAt)
+  });
+}
+
 export async function getLatestProjectState(projectId: string) {
   const [latestRevision] = await db
     .select()
@@ -718,6 +729,356 @@ export async function queryProjectAudits(projectId: string) {
     .from(auditRuns)
     .where(eq(auditRuns.projectId, projectId))
     .orderBy(desc(auditRuns.createdAt));
+}
+
+type AuditHistoryPdfStatus = PdfExportStatus | "not_requested";
+
+export type AuditHistoryItem = {
+  id: string;
+  revisionId: string;
+  revisionSource: RevisionSource;
+  revisionDescription: string | null;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  primaryModelId: string;
+  fallbackModelId: string;
+  findingCount: number;
+  pdfStatus: AuditHistoryPdfStatus;
+};
+
+type ComparisonFindingSummary = {
+  findingId: string;
+  title: string;
+  severity: string;
+  filePath: string;
+  startLine: number;
+};
+
+export type AuditCompareResponse = {
+  fromAudit: {
+    id: string;
+    revisionId: string;
+    createdAt: string;
+    findingCount: number;
+  };
+  toAudit: {
+    id: string;
+    revisionId: string;
+    createdAt: string;
+    findingCount: number;
+  };
+  summary: {
+    findings: {
+      fromTotal: number;
+      toTotal: number;
+      newCount: number;
+      resolvedCount: number;
+      persistingCount: number;
+      severityChangedCount: number;
+    };
+    files: {
+      addedCount: number;
+      removedCount: number;
+      unchangedCount: number;
+    };
+  };
+  findings: {
+    newlyDetected: ComparisonFindingSummary[];
+    resolved: ComparisonFindingSummary[];
+    persisting: Array<
+      Omit<ComparisonFindingSummary, "severity"> & {
+        fromSeverity: string;
+        toSeverity: string;
+      }
+    >;
+  };
+  files: {
+    added: string[];
+    removed: string[];
+    unchanged: string[];
+  };
+};
+
+export type AuditCompareResult =
+  | {
+      kind: "not-found";
+    }
+  | {
+      kind: "not-completed";
+      fromStatus: string;
+      toStatus: string;
+    }
+  | {
+      kind: "ok";
+      comparison: AuditCompareResponse;
+    };
+
+function toIsoString(value: Date | string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
+function readFindingSummary(params: {
+  findingId: string;
+  severity: string;
+  payloadJson: Record<string, unknown>;
+}): ComparisonFindingSummary {
+  const payload = params.payloadJson;
+  const evidence =
+    payload.evidence && typeof payload.evidence === "object"
+      ? (payload.evidence as Record<string, unknown>)
+      : null;
+  const startLineRaw = evidence?.startLine;
+  const startLine =
+    typeof startLineRaw === "number" && Number.isFinite(startLineRaw)
+      ? Math.max(0, Math.trunc(startLineRaw))
+      : 0;
+
+  return {
+    findingId: params.findingId,
+    title: typeof payload.title === "string" ? payload.title : "Untitled finding",
+    severity: typeof payload.severity === "string" ? payload.severity : params.severity,
+    filePath:
+      typeof evidence?.filePath === "string" && evidence.filePath.trim().length
+        ? evidence.filePath
+        : "unknown",
+    startLine
+  };
+}
+
+export async function queryProjectAuditHistory(projectId: string): Promise<AuditHistoryItem[]> {
+  const audits = await db
+    .select()
+    .from(auditRuns)
+    .where(eq(auditRuns.projectId, projectId))
+    .orderBy(desc(auditRuns.createdAt));
+
+  if (!audits.length) {
+    return [];
+  }
+
+  const auditIds = audits.map((audit) => audit.id);
+  const revisionIds = [...new Set(audits.map((audit) => audit.revisionId))];
+
+  const [revisionRows, findingCountRows, pdfRows] = await Promise.all([
+    db
+      .select({
+        id: revisions.id,
+        source: revisions.source,
+        description: revisions.description
+      })
+      .from(revisions)
+      .where(inArray(revisions.id, revisionIds)),
+    db
+      .select({
+        auditRunId: findingInstances.auditRunId,
+        count: sql<number>`cast(count(*) as int)`
+      })
+      .from(findingInstances)
+      .where(inArray(findingInstances.auditRunId, auditIds))
+      .groupBy(findingInstances.auditRunId),
+    db
+      .select({
+        auditRunId: pdfExports.auditRunId,
+        status: pdfExports.status
+      })
+      .from(pdfExports)
+      .where(inArray(pdfExports.auditRunId, auditIds))
+  ]);
+
+  const revisionById = new Map(
+    revisionRows.map((row) => [row.id, { source: row.source, description: row.description }])
+  );
+  const findingCountByAuditId = new Map(
+    findingCountRows.map((row) => [row.auditRunId, Number(row.count) || 0])
+  );
+  const pdfStatusByAuditId = new Map(pdfRows.map((row) => [row.auditRunId, row.status]));
+
+  return audits.map((audit) => {
+    const revisionMeta = revisionById.get(audit.revisionId);
+
+    return {
+      id: audit.id,
+      revisionId: audit.revisionId,
+      revisionSource: revisionMeta?.source ?? "working-copy",
+      revisionDescription: revisionMeta?.description ?? null,
+      status: audit.status,
+      createdAt: toIsoString(audit.createdAt) ?? new Date(0).toISOString(),
+      startedAt: toIsoString(audit.startedAt),
+      finishedAt: toIsoString(audit.finishedAt),
+      primaryModelId: audit.primaryModelId,
+      fallbackModelId: audit.fallbackModelId,
+      findingCount: findingCountByAuditId.get(audit.id) ?? 0,
+      pdfStatus: pdfStatusByAuditId.get(audit.id) ?? "not_requested"
+    };
+  });
+}
+
+export async function getAuditComparison(params: {
+  projectId: string;
+  fromAuditId: string;
+  toAuditId: string;
+}): Promise<AuditCompareResult> {
+  const uniqueAuditIds = [...new Set([params.fromAuditId, params.toAuditId])];
+  if (uniqueAuditIds.length !== 2) {
+    return { kind: "not-found" };
+  }
+
+  const selectedAudits = await db
+    .select()
+    .from(auditRuns)
+    .where(and(eq(auditRuns.projectId, params.projectId), inArray(auditRuns.id, uniqueAuditIds)));
+
+  const explicitFromAudit = selectedAudits.find((audit) => audit.id === params.fromAuditId);
+  const explicitToAudit = selectedAudits.find((audit) => audit.id === params.toAuditId);
+  if (!explicitFromAudit || !explicitToAudit) {
+    return { kind: "not-found" };
+  }
+
+  if (explicitFromAudit.status !== "completed" || explicitToAudit.status !== "completed") {
+    return {
+      kind: "not-completed",
+      fromStatus: explicitFromAudit.status,
+      toStatus: explicitToAudit.status
+    };
+  }
+
+  const [olderAudit, newerAudit] = [explicitFromAudit, explicitToAudit].sort((left, right) => {
+    const delta = left.createdAt.getTime() - right.createdAt.getTime();
+    if (delta !== 0) {
+      return delta;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+
+  const [findingRows, olderFileRows, newerFileRows] = await Promise.all([
+    db
+      .select({
+        auditRunId: findingInstances.auditRunId,
+        findingId: findingInstances.findingId,
+        severity: findingInstances.severity,
+        payloadJson: findingInstances.payloadJson
+      })
+      .from(findingInstances)
+      .where(inArray(findingInstances.auditRunId, [olderAudit.id, newerAudit.id])),
+    db
+      .select({
+        path: revisionFiles.path
+      })
+      .from(revisionFiles)
+      .where(eq(revisionFiles.revisionId, olderAudit.revisionId)),
+    db
+      .select({
+        path: revisionFiles.path
+      })
+      .from(revisionFiles)
+      .where(eq(revisionFiles.revisionId, newerAudit.revisionId))
+  ]);
+
+  const olderFindingsById = new Map<string, ComparisonFindingSummary>();
+  const newerFindingsById = new Map<string, ComparisonFindingSummary>();
+
+  for (const row of findingRows) {
+    const summary = readFindingSummary({
+      findingId: row.findingId,
+      severity: row.severity,
+      payloadJson: row.payloadJson ?? {}
+    });
+
+    if (row.auditRunId === olderAudit.id) {
+      olderFindingsById.set(row.findingId, summary);
+    } else if (row.auditRunId === newerAudit.id) {
+      newerFindingsById.set(row.findingId, summary);
+    }
+  }
+
+  const newlyDetected = [...newerFindingsById.entries()]
+    .filter(([findingId]) => !olderFindingsById.has(findingId))
+    .map(([, summary]) => summary)
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const resolved = [...olderFindingsById.entries()]
+    .filter(([findingId]) => !newerFindingsById.has(findingId))
+    .map(([, summary]) => summary)
+    .sort((left, right) => left.title.localeCompare(right.title));
+
+  const persisting = [...newerFindingsById.entries()]
+    .filter(([findingId]) => olderFindingsById.has(findingId))
+    .map(([findingId, toSummary]) => {
+      const fromSummary = olderFindingsById.get(findingId)!;
+      return {
+        findingId,
+        title: toSummary.title,
+        fromSeverity: fromSummary.severity,
+        toSeverity: toSummary.severity,
+        filePath: toSummary.filePath,
+        startLine: toSummary.startLine
+      };
+    })
+    .sort((left, right) => left.title.localeCompare(right.title));
+
+  const severityChangedCount = persisting.filter(
+    (entry) => entry.fromSeverity !== entry.toSeverity
+  ).length;
+
+  const olderFileSet = new Set(olderFileRows.map((row) => row.path));
+  const newerFileSet = new Set(newerFileRows.map((row) => row.path));
+  const added = [...newerFileSet].filter((path) => !olderFileSet.has(path)).sort((a, b) => a.localeCompare(b));
+  const removed = [...olderFileSet].filter((path) => !newerFileSet.has(path)).sort((a, b) => a.localeCompare(b));
+  const unchanged = [...newerFileSet].filter((path) => olderFileSet.has(path)).sort((a, b) => a.localeCompare(b));
+
+  return {
+    kind: "ok",
+    comparison: {
+      fromAudit: {
+        id: olderAudit.id,
+        revisionId: olderAudit.revisionId,
+        createdAt: toIsoString(olderAudit.createdAt) ?? new Date(0).toISOString(),
+        findingCount: olderFindingsById.size
+      },
+      toAudit: {
+        id: newerAudit.id,
+        revisionId: newerAudit.revisionId,
+        createdAt: toIsoString(newerAudit.createdAt) ?? new Date(0).toISOString(),
+        findingCount: newerFindingsById.size
+      },
+      summary: {
+        findings: {
+          fromTotal: olderFindingsById.size,
+          toTotal: newerFindingsById.size,
+          newCount: newlyDetected.length,
+          resolvedCount: resolved.length,
+          persistingCount: persisting.length,
+          severityChangedCount
+        },
+        files: {
+          addedCount: added.length,
+          removedCount: removed.length,
+          unchangedCount: unchanged.length
+        }
+      },
+      findings: {
+        newlyDetected,
+        resolved,
+        persisting
+      },
+      files: {
+        added,
+        removed,
+        unchanged
+      }
+    }
+  };
 }
 
 export async function createPdfExport(auditRunId: string) {
