@@ -18,8 +18,15 @@ const globalForAuth = globalThis as unknown as {
   auth?: AppAuth;
 };
 
+const authAdapterSchema = {
+  users: dbSchema.users,
+  sessions: dbSchema.sessions,
+  accounts: dbSchema.accounts,
+  verifications: dbSchema.verifications
+} as const;
+
 export function getAuthAdapterSchema() {
-  return dbSchema;
+  return authAdapterSchema;
 }
 
 function toNonEmptyString(value: unknown) {
