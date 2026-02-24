@@ -1,3 +1,5 @@
+<img width="1919" height="908" alt="image" src="https://github.com/user-attachments/assets/e3452245-bbe1-4970-a15b-9c2e2c971e4f" />
+
 # TON Audit Platform
 
 Self-hosted TON smart-contract audit platform with:
