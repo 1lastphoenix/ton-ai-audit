@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { auth, getAuthAdapterSchema } from "../lib/server/auth";
+import { auth, getAuthAdapterSchema, mapGitHubProfileToUser } from "../lib/server/auth";
 import { dbSchema } from "@ton-audit/shared";
 
 describe("server auth export", () => {
@@ -28,5 +28,21 @@ describe("server auth export", () => {
   it("exposes Better Auth verifications table in adapter schema", () => {
     const schema = getAuthAdapterSchema();
     expect(schema.verifications).toBe(dbSchema.verifications);
+  });
+
+  it("maps GitHub profiles without email to a deterministic fallback", () => {
+    expect(mapGitHubProfileToUser({ id: 42, email: null })).toEqual({
+      email: "github-42@users.noreply.github.com",
+      emailVerified: false
+    });
+
+    expect(mapGitHubProfileToUser({ login: "OctoCat", email: "" })).toEqual({
+      email: "octocat@users.noreply.github.com",
+      emailVerified: false
+    });
+  });
+
+  it("does not override provider email when GitHub returns one", () => {
+    expect(mapGitHubProfileToUser({ email: "user@example.com", id: 1 })).toEqual({});
   });
 });

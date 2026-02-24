@@ -8,6 +8,11 @@ import { getDb } from "./db";
 import { getEnv } from "./env";
 
 type AppAuth = ReturnType<typeof betterAuth>;
+type GitHubProfile = {
+  id?: unknown;
+  login?: unknown;
+  email?: unknown;
+};
 
 const globalForAuth = globalThis as unknown as {
   auth?: AppAuth;
@@ -15,6 +20,53 @@ const globalForAuth = globalThis as unknown as {
 
 export function getAuthAdapterSchema() {
   return dbSchema;
+}
+
+function toNonEmptyString(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function toIdentifierSegment(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+
+  const normalized = toNonEmptyString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const sanitized = normalized.replace(/[^a-zA-Z0-9._-]/g, "");
+  return sanitized.length > 0 ? sanitized : null;
+}
+
+export function mapGitHubProfileToUser(profile: GitHubProfile) {
+  if (toNonEmptyString(profile.email)) {
+    return {};
+  }
+
+  const accountId = toIdentifierSegment(profile.id);
+  if (accountId) {
+    return {
+      email: `github-${accountId}@users.noreply.github.com`,
+      emailVerified: false
+    };
+  }
+
+  const login = toIdentifierSegment(profile.login);
+  if (!login) {
+    return {};
+  }
+
+  return {
+    email: `${login.toLowerCase()}@users.noreply.github.com`,
+    emailVerified: false
+  };
 }
 
 export function getAuth() {
@@ -36,7 +88,11 @@ export function getAuth() {
     socialProviders: {
       github: {
         clientId: env.GITHUB_CLIENT_ID,
-        clientSecret: env.GITHUB_CLIENT_SECRET
+        clientSecret: env.GITHUB_CLIENT_SECRET,
+        scope: ["read:user", "user:email"],
+        mapProfileToUser(profile) {
+          return mapGitHubProfileToUser(profile as GitHubProfile);
+        }
       }
     },
     plugins: [nextCookies()],
