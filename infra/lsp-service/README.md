@@ -4,7 +4,7 @@ WebSocket bridge for `ton-language-server` (stdio) so Monaco can use full LSP di
 
 ## Endpoints
 
-- `GET /health`
+- `GET /health` (includes `assetsReady` / `missingAssets` for grammar WASM readiness)
 - `WS /` JSON-RPC transport (LSP)
 
 ## Env
@@ -18,3 +18,4 @@ WebSocket bridge for `ton-language-server` (stdio) so Monaco can use full LSP di
 - The bridge spawns one language-server process per WebSocket connection.
 - Messages are framed/unframed via standard LSP `Content-Length` protocol.
 - `Dockerfile` clones and builds `ton-blockchain/ton-language-server` and uses `dist/server.js`.
+- The image uses Debian trixie + `curl` because modern `tree-sitter-cli` and grammar WASM builds require newer glibc/runtime tooling.

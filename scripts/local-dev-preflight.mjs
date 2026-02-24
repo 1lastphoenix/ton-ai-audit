@@ -406,6 +406,41 @@ async function waitForHttpOk(url, timeoutMs = 180_000) {
   throw new Error(`Timed out waiting for ${url} (${lastError})`);
 }
 
+async function waitForTonLspReady(url = "http://localhost:3002/health", timeoutMs = 180_000) {
+  const startedAt = Date.now();
+  let lastError = "unknown";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}`;
+      } else {
+        const payload = await response.json().catch(() => null);
+        if (!payload || typeof payload !== "object" || !("assetsReady" in payload)) {
+          return;
+        }
+
+        if (payload.assetsReady === true) {
+          return;
+        }
+
+        const missingAssets =
+          Array.isArray(payload.missingAssets) && payload.missingAssets.length > 0
+            ? payload.missingAssets.join(", ")
+            : "unknown";
+        lastError = `missing assets: ${missingAssets}`;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    await sleep(2_000);
+  }
+
+  throw new Error(`Timed out waiting for TON LSP readiness at ${url} (${lastError})`);
+}
+
 function parseCliArgs(argv) {
   const envFlagIndex = argv.indexOf("--env-file");
   const serve = argv.includes("--serve");
@@ -482,7 +517,7 @@ export async function runLocalDevPreflight(options = {}) {
   }
 
   await waitForHttpOk("http://localhost:3003/health");
-  await waitForHttpOk("http://localhost:3002/health");
+  await waitForTonLspReady("http://localhost:3002/health");
 
   runCommand("pnpm lint", envFromFile);
   runCommand("pnpm typecheck", envFromFile);

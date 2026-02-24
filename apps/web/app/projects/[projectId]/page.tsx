@@ -22,8 +22,8 @@ export default async function ProjectPage(props: {
   const modelAllowlist = await getAuditModelAllowlist();
 
   return (
-    <main className="bg-background text-foreground min-h-screen">
-      <div className="mx-auto max-w-[1500px] px-2 py-2 lg:px-3 lg:py-3">
+    <main className="bg-background text-foreground h-dvh w-screen min-h-0 min-w-0 overflow-hidden">
+      <div className="h-full w-full min-h-0 min-w-0 overflow-hidden">
         <ProjectWorkspace
           projectId={project.id}
           projectName={project.name}

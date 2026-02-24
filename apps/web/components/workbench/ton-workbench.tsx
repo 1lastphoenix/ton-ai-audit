@@ -24,11 +24,12 @@ import {
   Folder,
   FolderTree,
   FolderOpen,
-  Loader2,
+  Lock,
   MoreHorizontal,
+  Pencil,
   Play,
   RefreshCcw,
-  Search,
+  Save,
   Shield,
   TerminalSquare,
   Upload,
@@ -37,7 +38,6 @@ import {
 
 import { detectLanguageFromPath, normalizePath, type Language } from "@ton-audit/shared";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -52,18 +52,16 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import {
   registerTonLanguages,
   startTonLspClient,
@@ -268,21 +266,6 @@ function toAuditStatusLabel(status: string) {
       return "Failed";
     default:
       return "Idle";
-  }
-}
-
-function auditStatusBadgeClass(status: string) {
-  switch (status) {
-    case "queued":
-      return "border-border bg-secondary text-secondary-foreground";
-    case "running":
-      return "border-border bg-accent text-accent-foreground";
-    case "completed":
-      return "border-border bg-primary/15 text-foreground";
-    case "failed":
-      return "border-destructive/40 bg-destructive/10 text-destructive";
-    default:
-      return "border-border bg-muted text-muted-foreground";
   }
 }
 
@@ -1082,10 +1065,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
   const saveFilePath = useCallback(
     async (path: string, options?: { withoutBusy?: boolean }) => {
-      if (!workingCopyId) {
-        return false;
-      }
-
       const fileEntry = fileCache[path];
       if (!fileEntry) {
         return false;
@@ -1097,7 +1076,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setLastError(null);
 
       try {
-        const response = await fetch(`/api/projects/${projectId}/working-copies/${workingCopyId}/file`, {
+        const activeWorkingCopyId =
+          workingCopyId ?? (isEditable ? await ensureWorkingCopy() : null);
+        if (!activeWorkingCopyId) {
+          throw new Error("Enable editing before saving.");
+        }
+
+        const response = await fetch(`/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json"
@@ -1113,6 +1098,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         setDirtyPaths((current) => current.filter((entry) => entry !== path));
+        if (!options?.withoutBusy) {
+          setActivityMessage(`Saved ${getFileName(path)}.`);
+        }
         return true;
       } catch (error) {
         setLastError(error instanceof Error ? error.message : "Save failed");
@@ -1124,7 +1112,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
       }
     },
-    [fileCache, projectId, pushWorkbenchLog, workingCopyId]
+    [ensureWorkingCopy, fileCache, isEditable, projectId, pushWorkbenchLog, workingCopyId]
   );
 
   const saveCurrentFile = useCallback(
@@ -1199,10 +1187,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [dirtyPathSet, isBusy, isEditable, saveCurrentFile, selectedPath]);
 
   async function runAudit() {
-    if (!workingCopyId) {
-      return;
-    }
-
     setIsBusy(true);
     setJobState("queuing");
     setLastError(null);
@@ -1210,6 +1194,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     pushWorkbenchLog("info", "Queueing audit run from current working copy.");
 
     try {
+      const activeWorkingCopyId =
+        workingCopyId ?? (isEditable ? await ensureWorkingCopy() : null);
+      if (!activeWorkingCopyId) {
+        throw new Error("Enable editing before running an audit.");
+      }
+
       const pathsToPersist = dirtyPaths.length
         ? [...new Set(dirtyPaths)]
         : selectedPath
@@ -1222,7 +1212,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
       }
 
-      const response = await fetch(`/api/projects/${projectId}/working-copies/${workingCopyId}/run-audit`, {
+      const response = await fetch(`/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/run-audit`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -1499,44 +1489,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         onChange={uploadFilesToWorkingCopy}
       />
 
-      <div className="bg-background text-foreground flex min-h-[84vh] flex-col overflow-hidden rounded-xl border border-border">
-        <div className="bg-card/70 flex h-9 items-center border-b border-border px-3 text-[11px]">
-          <div className="flex items-center gap-1">
-            <Button type="button" size="icon-sm" variant="ghost" className="size-6 text-muted-foreground">
-              <FolderTree className="size-3.5" />
-            </Button>
-            <span className="mr-2 max-w-[160px] truncate font-semibold text-foreground">{projectName}</span>
-            {["File", "Edit", "Selection", "View", "Go", "Run", "Terminal"].map((item) => (
-              <Button
-                key={item}
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-              >
-                {item}
-              </Button>
-            ))}
-          </div>
-
-          <div className="mx-auto hidden max-w-[420px] flex-1 px-4 md:block">
-            <div className="bg-background/70 text-muted-foreground flex h-7 items-center gap-2 rounded-md border border-border px-2">
-              <Search className="size-3.5" />
-              <span className="truncate">Search files, symbols, commands</span>
-            </div>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            <Badge variant="outline" className={cn("h-6 border px-2 text-[11px]", auditStatusBadgeClass(auditStatus))}>
-              {isAuditInProgress ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-              Audit {auditStatusLabel}
-            </Badge>
-            <span className="text-muted-foreground hidden md:inline">job {jobState}</span>
-          </div>
-        </div>
-
-        <div className={cn("grid min-h-0 flex-1 grid-cols-1", workbenchGridClassName)}>
-        <aside className="bg-muted/30 hidden flex-col items-center gap-3 border-r border-border px-2 py-3 lg:flex">
+      <div className="bg-background text-foreground flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+        <div className={cn("grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden", workbenchGridClassName)}>
+        <aside className="bg-muted/30 hidden min-h-0 flex-col items-center gap-3 border-r border-border px-2 py-3 lg:flex">
           <Button
             type="button"
             size="icon-sm"
@@ -1580,7 +1535,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         {isExplorerVisible ? (
         <ContextMenu>
           <ContextMenuTrigger asChild>
-            <aside className="bg-muted/30 border-b border-border p-3 lg:border-r lg:border-b-0">
+            <aside className="bg-muted/30 flex min-h-0 flex-col overflow-hidden border-b border-border p-3 lg:border-r lg:border-b-0">
               <div className="mb-2 flex items-center gap-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1684,17 +1639,21 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 placeholder="Filter files (Ctrl/Cmd+P)"
               />
 
-              {filteredTree.length ? (
-                <TreeView
-                  nodes={filteredTree}
-                  selectedPath={selectedPath}
-                  onSelect={openFileInEditor}
-                  expandedDirectories={treeViewExpandedDirectories}
-                  onToggleDirectory={toggleDirectory}
-                />
-              ) : (
-                <p className="text-muted-foreground px-1 text-xs">No files match your filter.</p>
-              )}
+              <ScrollArea className="min-h-0 flex-1 pr-1">
+                <div className="pb-1">
+                  {filteredTree.length ? (
+                    <TreeView
+                      nodes={filteredTree}
+                      selectedPath={selectedPath}
+                      onSelect={openFileInEditor}
+                      expandedDirectories={treeViewExpandedDirectories}
+                      onToggleDirectory={toggleDirectory}
+                    />
+                  ) : (
+                    <p className="text-muted-foreground px-1 text-xs">No files match your filter.</p>
+                  )}
+                </div>
+              </ScrollArea>
             </aside>
           </ContextMenuTrigger>
           <ContextMenuContent>
@@ -1731,156 +1690,231 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         </ContextMenu>
         ) : null}
 
-        <section className="flex min-w-0 flex-col">
-          <header className="bg-card/60 border-b border-border px-2 text-xs">
-            <div className="flex min-h-10 flex-wrap items-center gap-1.5 py-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7"
-                disabled={isBusy || (!isEditable && !revisionId)}
-                onClick={() => {
-                  void toggleEditMode();
-                }}
-              >
-                {isEditable ? "Read-only" : "Edit"}
-              </Button>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+          <div className="bg-muted/25 border-b border-border">
+            <div className="flex h-10 min-w-0 items-stretch">
+              <div className="min-w-0 flex-1">
+                {openTabs.length ? (
+                  <ScrollArea className="h-full w-full">
+                    <div className="flex h-10 w-max items-stretch">
+                      {openTabs.map((path) => {
+                        const isActive = selectedPath === path;
+                        return (
+                          <div
+                            key={path}
+                            className={cn(
+                              "group flex items-center border-r border-border",
+                              isActive ? "bg-card text-foreground" : "bg-muted/20 text-muted-foreground"
+                            )}
+                          >
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openFileInEditor(path)}
+                              className={cn(
+                                "h-10 min-w-[150px] max-w-[240px] justify-start rounded-none px-2.5 text-xs",
+                                isActive ? "text-foreground hover:bg-transparent" : "hover:bg-accent/40"
+                              )}
+                            >
+                              <FileCode2 className="size-3" />
+                              <span className="truncate">{getFileName(path)}</span>
+                              {dirtyPathSet.has(path) ? (
+                                <span className="bg-primary ml-1 inline-block size-1.5 rounded-full" />
+                              ) : null}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className={cn(
+                                "mr-0.5 size-6 rounded-sm opacity-0 transition-opacity group-hover:opacity-100",
+                                isActive ? "opacity-100" : ""
+                              )}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                closeOpenTab(path);
+                              }}
+                              aria-label={`Close ${getFileName(path)}`}
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <ScrollBar orientation="horizontal" />
+                  </ScrollArea>
+                ) : (
+                  <div className="text-muted-foreground flex h-full items-center px-3 text-xs">
+                    Open a file to start editing.
+                  </div>
+                )}
+              </div>
 
-              <Button size="sm" className="h-7" disabled={!isEditable || isBusy} onClick={runAudit}>
-                <Play className="mr-1 size-3" />
-                Run Audit
-              </Button>
+              <div className="bg-card/80 flex shrink-0 items-center gap-0.5 border-l border-border px-1">
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="size-6 rounded-sm"
+                  disabled={isBusy || (!isEditable && !revisionId)}
+                  onClick={() => {
+                    void toggleEditMode();
+                  }}
+                  aria-label={isEditable ? "Read-only" : "Edit"}
+                  title={isEditable ? "Read-only" : "Edit"}
+                >
+                  {isEditable ? <Lock className="size-3.5" /> : <Pencil className="size-3.5" />}
+                </Button>
 
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7"
-                disabled={!auditId || isBusy || auditStatus !== "completed"}
-                onClick={exportPdf}
-              >
-                <FileDown className="mr-1 size-3" />
-                Export PDF
-              </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="size-6 rounded-sm"
+                  disabled={!isEditable || isBusy || !selectedPath || !dirtyPathSet.has(selectedPath)}
+                  onClick={() => {
+                    void saveCurrentFile();
+                  }}
+                  aria-label="Save file"
+                  title="Save file"
+                >
+                  <Save className="size-3.5" />
+                </Button>
 
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="size-7"
-                disabled={isBusy || !revisionId}
-                onClick={refreshWorkbenchData}
-                aria-label="Refresh workbench"
-              >
-                <RefreshCcw className="size-3.5" />
-              </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="size-6 rounded-sm"
+                  disabled={!isEditable || isBusy}
+                  onClick={runAudit}
+                  aria-label="Run Audit"
+                  title="Run Audit"
+                >
+                  <Play className="size-3" />
+                </Button>
 
-              <Button
-                size="icon-sm"
-                variant={isBottomPanelVisible ? "secondary" : "ghost"}
-                className="size-7"
-                onClick={() => {
-                  setIsBottomPanelVisible((current) => !current);
-                }}
-                aria-label="Toggle bottom panel"
-              >
-                <TerminalSquare className="size-3.5" />
-              </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="size-6 rounded-sm"
+                  disabled={!auditId || isBusy || auditStatus !== "completed"}
+                  onClick={exportPdf}
+                  aria-label="Export PDF"
+                  title="Export PDF"
+                >
+                  <FileDown className="size-3.5" />
+                </Button>
 
-              <div className="bg-border mx-1 hidden h-4 w-px md:block" />
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="size-6 rounded-sm"
+                  disabled={isBusy || !revisionId}
+                  onClick={refreshWorkbenchData}
+                  aria-label="Refresh workbench"
+                  title="Refresh workbench"
+                >
+                  <RefreshCcw className="size-3.5" />
+                </Button>
 
-              <Select value={primaryModelId} onValueChange={setPrimaryModelId}>
-                <SelectTrigger size="sm" className="bg-background h-7 w-[190px] text-[11px]">
-                  <SelectValue placeholder="Primary model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelAllowlist.map((model) => (
-                    <SelectItem key={`primary-${model}`} value={model}>
-                      {model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant={isBottomPanelVisible ? "secondary" : "ghost"}
+                  className="size-6 rounded-sm"
+                  onClick={() => {
+                    setIsBottomPanelVisible((current) => !current);
+                  }}
+                  aria-label="Toggle bottom panel"
+                  title="Toggle bottom panel"
+                >
+                  <TerminalSquare className="size-3.5" />
+                </Button>
 
-              <Select value={fallbackModelId} onValueChange={setFallbackModelId}>
-                <SelectTrigger size="sm" className="bg-background h-7 w-[190px] text-[11px]">
-                  <SelectValue placeholder="Fallback model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelAllowlist.map((model) => (
-                    <SelectItem key={`fallback-${model}`} value={model}>
-                      {model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <span
+                  className={cn(
+                    "mx-1 hidden size-1.5 rounded-full md:inline-flex",
+                    auditStatus === "failed"
+                      ? "bg-destructive"
+                      : isAuditInProgress
+                        ? "bg-primary"
+                        : "bg-muted-foreground/50"
+                  )}
+                  title={`Audit ${auditStatusLabel}`}
+                  aria-hidden="true"
+                />
 
-              <div className="text-muted-foreground ml-auto flex items-center gap-2 text-[11px]">
-                <span>rev {shortId(revisionId)}</span>
-                <span>audit {shortId(auditId)}</span>
-                <span>LSP {lspStatus}</span>
-                {dirtyPaths.length ? <Badge variant="destructive">unsaved {dirtyPaths.length}</Badge> : null}
+                {dirtyPaths.length ? (
+                  <span
+                    className="mr-0.5 hidden size-1.5 rounded-full bg-destructive md:inline-flex"
+                    title={`${dirtyPaths.length} unsaved file(s)`}
+                    aria-hidden="true"
+                  />
+                ) : null}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6 rounded-sm"
+                      aria-label="Workbench options"
+                    >
+                      <MoreHorizontal className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Workbench</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        router.push("/dashboard");
+                      }}
+                    >
+                      Back to dashboard
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Primary model</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-64">
+                        <DropdownMenuRadioGroup value={primaryModelId} onValueChange={setPrimaryModelId}>
+                          {modelAllowlist.map((model) => (
+                            <DropdownMenuRadioItem key={`toolbar-primary-${model}`} value={model}>
+                              {model}
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Fallback model</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-64">
+                        <DropdownMenuRadioGroup value={fallbackModelId} onValueChange={setFallbackModelId}>
+                          {modelAllowlist.map((model) => (
+                            <DropdownMenuRadioItem key={`toolbar-fallback-${model}`} value={model}>
+                              {model}
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-[11px]">
+                      rev {shortId(revisionId)} · audit {shortId(auditId)} · LSP {lspStatus} · job {jobState}
+                    </DropdownMenuLabel>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
-          </header>
-
-          <div className="bg-muted/20 border-b border-border">
-            {openTabs.length ? (
-              <ScrollArea className="w-full">
-                <div className="flex h-10 w-max items-stretch">
-                  {openTabs.map((path) => {
-                    const isActive = selectedPath === path;
-                    return (
-                      <div
-                        key={path}
-                        className={cn(
-                          "group flex items-center border-r border-border",
-                          isActive ? "bg-background text-foreground" : "bg-muted/20 text-muted-foreground"
-                        )}
-                      >
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openFileInEditor(path)}
-                          className={cn(
-                            "h-10 min-w-[150px] max-w-[240px] justify-start rounded-none px-3 text-xs",
-                            isActive ? "text-foreground hover:bg-transparent" : "hover:bg-muted/50"
-                          )}
-                        >
-                          <FileCode2 className="size-3" />
-                          <span className="truncate">{getFileName(path)}</span>
-                          {dirtyPathSet.has(path) ? (
-                            <span className="bg-primary ml-1 inline-block size-1.5 rounded-full" />
-                          ) : null}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className={cn(
-                            "mr-1 size-6 rounded-sm opacity-0 transition-opacity group-hover:opacity-100",
-                            isActive ? "opacity-100" : ""
-                          )}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            closeOpenTab(path);
-                          }}
-                          aria-label={`Close ${getFileName(path)}`}
-                        >
-                          <X className="size-3.5" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-                <ScrollBar orientation="horizontal" />
-              </ScrollArea>
-            ) : (
-              <div className="text-muted-foreground px-3 py-2 text-xs">Open a file to start editing.</div>
-            )}
           </div>
 
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-hidden">
             {selectedPath ? (
               <MonacoEditor
                 path={`file:///workspace/${selectedPath}`}
@@ -1987,7 +2021,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         </section>
 
         {isFindingsVisible ? (
-          <aside className="bg-muted/20 border-t border-border p-3 lg:border-l lg:border-t-0">
+          <aside className="bg-muted/20 min-h-0 overflow-y-auto border-t border-border p-3 lg:border-l lg:border-t-0">
             <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">Findings</div>
             <div className="space-y-2">
               {findings.length === 0 ? (

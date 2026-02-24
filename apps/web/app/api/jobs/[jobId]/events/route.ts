@@ -34,7 +34,7 @@ export async function GET(
       .limit(1);
 
     if (
-      !eventScope ||
+      eventScope &&
       !canReadJobEvents({
         requestedProjectId: projectId,
         eventProjectId: eventScope.projectId
