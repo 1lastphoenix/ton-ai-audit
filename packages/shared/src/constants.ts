@@ -212,10 +212,18 @@ export const envConfigSchema = z.object({
 });
 
 export function parseModelAllowlist(value: string): string[] {
+  const seen = new Set<string>();
+
   return value
     .split(",")
     .map((model) => model.trim())
-    .filter(Boolean);
+    .filter((model) => {
+      if (!model || seen.has(model)) {
+        return false;
+      }
+      seen.add(model);
+      return true;
+    });
 }
 
 export function parseAdminEmails(value: string): string[] {

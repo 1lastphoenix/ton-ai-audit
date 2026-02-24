@@ -85,4 +85,22 @@ describe("ton workbench actions", () => {
     expect(source).toContain("exportPdfForAudit");
     expect(source).toContain("void exportPdfForAudit(item.id)");
   });
+
+  it("falls back to Monaco language highlighting for ts/js/md style files", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain('".ts": "typescript"');
+    expect(source).toContain('".js": "javascript"');
+    expect(source).toContain('".md": "markdown"');
+    expect(source).toContain("resolveMonacoLanguage");
+  });
+
+  it("deduplicates model options before rendering selector items", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("normalizeModelAllowlist");
+    expect(source).toContain("const modelOptions = normalizeModelAllowlist(props.modelAllowlist)");
+  });
 });

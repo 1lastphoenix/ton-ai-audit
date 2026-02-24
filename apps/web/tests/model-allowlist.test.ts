@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseModelAllowlist } from "@ton-audit/shared";
 
 import { assertAllowedModel } from "../lib/server/model-allowlist-core";
 
@@ -19,5 +20,13 @@ describe("assertAllowedModel", () => {
         "google/gemini-2.5-flash",
       ]),
     ).toThrow(/allowlist/i);
+  });
+
+  it("deduplicates parsed allowlist entries while preserving order", () => {
+    expect(
+      parseModelAllowlist(
+        "google/gemini-2.5-flash, google/gemini-2.5-flash, anthropic/claude-sonnet-4,google/gemini-2.5-flash",
+      ),
+    ).toEqual(["google/gemini-2.5-flash", "anthropic/claude-sonnet-4"]);
   });
 });

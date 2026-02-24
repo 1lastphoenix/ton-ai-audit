@@ -320,6 +320,24 @@ function RailToggleButton(props: {
   );
 }
 
+const DEFAULT_MODEL_ID = "google/gemini-2.5-flash";
+
+function normalizeModelAllowlist(models: string[]): string[] {
+  const uniqueModels: string[] = [];
+  const seenModels = new Set<string>();
+
+  for (const model of models) {
+    const normalized = model.trim();
+    if (!normalized || seenModels.has(normalized)) {
+      continue;
+    }
+    seenModels.add(normalized);
+    uniqueModels.push(normalized);
+  }
+
+  return uniqueModels;
+}
+
 function ModelSelectorSubmenu(props: {
   label: string;
   value: string;
@@ -327,6 +345,8 @@ function ModelSelectorSubmenu(props: {
   modelAllowlist: string[];
   onValueChange: (value: string) => void;
 }) {
+  const modelOptions = normalizeModelAllowlist(props.modelAllowlist);
+
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>{props.label}</DropdownMenuSubTrigger>
@@ -335,7 +355,7 @@ function ModelSelectorSubmenu(props: {
           value={props.value}
           onValueChange={props.onValueChange}
         >
-          {props.modelAllowlist.map((model) => (
+          {modelOptions.map((model) => (
             <DropdownMenuRadioItem
               key={`${props.keyPrefix}-${model}`}
               value={model}
@@ -378,6 +398,48 @@ const languageMap: Record<string, string> = {
   "tl-b": "tl-b",
   unknown: "plaintext",
 };
+
+const extensionLanguageMap: Record<string, string> = {
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".mts": "typescript",
+  ".cts": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".md": "markdown",
+  ".markdown": "markdown",
+  ".json": "json",
+  ".xml": "xml",
+};
+
+function getFileExtension(filePath: string | null): string {
+  if (!filePath) {
+    return "";
+  }
+
+  const fileName = filePath.split("/").pop() ?? filePath;
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0) {
+    return "";
+  }
+
+  return fileName.slice(dotIndex).toLowerCase();
+}
+
+function resolveMonacoLanguage(params: {
+  filePath: string | null;
+  language: Language | undefined;
+}): string {
+  const canonicalLanguage = params.language ?? "unknown";
+  if (canonicalLanguage !== "unknown") {
+    return languageMap[canonicalLanguage] ?? "plaintext";
+  }
+
+  const extension = getFileExtension(params.filePath);
+  return extensionLanguageMap[extension] ?? "plaintext";
+}
 
 function treeFiles(nodes: TreeNode[]): string[] {
   const files: string[] = [];
@@ -954,6 +1016,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   } = props;
   const router = useRouter();
   const { resolvedTheme } = useTheme();
+  const normalizedModelAllowlist = useMemo(() => {
+    const normalized = normalizeModelAllowlist(modelAllowlist);
+    return normalized.length ? normalized : [DEFAULT_MODEL_ID];
+  }, [modelAllowlist]);
 
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const lspClientRef = useRef<{ dispose: () => Promise<void> | void } | null>(
@@ -985,10 +1051,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     useState<AuditCompareResponse | null>(null);
   const [isAuditCompareLoading, setIsAuditCompareLoading] = useState(false);
   const [primaryModelId, setPrimaryModelId] = useState(
-    modelAllowlist[0] ?? "google/gemini-2.5-flash",
+    () => normalizedModelAllowlist[0] ?? DEFAULT_MODEL_ID,
   );
   const [fallbackModelId, setFallbackModelId] = useState(
-    modelAllowlist[1] ?? modelAllowlist[0] ?? "google/gemini-2.5-flash",
+    () =>
+      normalizedModelAllowlist[1] ??
+      normalizedModelAllowlist[0] ??
+      DEFAULT_MODEL_ID,
   );
   const [jobState, setJobState] = useState<string>("idle");
   const [auditStatus, setAuditStatus] = useState<string>("idle");
@@ -1036,6 +1105,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   );
   const dirtyPathSet = useMemo(() => new Set(dirtyPaths), [dirtyPaths]);
   const currentFile = selectedPath ? fileCache[selectedPath] : null;
+  const currentMonacoLanguage = useMemo(
+    () =>
+      resolveMonacoLanguage({
+        filePath: selectedPath,
+        language: currentFile?.language,
+      }),
+    [currentFile?.language, selectedPath],
+  );
   const auditStatusLabel = toAuditStatusLabel(auditStatus);
   const isAuditInProgress =
     auditStatus === "queued" || auditStatus === "running";
@@ -1983,6 +2060,21 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [tree]);
 
   useEffect(() => {
+    setPrimaryModelId((current) =>
+      normalizedModelAllowlist.includes(current)
+        ? current
+        : (normalizedModelAllowlist[0] ?? DEFAULT_MODEL_ID),
+    );
+    setFallbackModelId((current) =>
+      normalizedModelAllowlist.includes(current)
+        ? current
+        : (normalizedModelAllowlist[1] ??
+            normalizedModelAllowlist[0] ??
+            DEFAULT_MODEL_ID),
+    );
+  }, [normalizedModelAllowlist]);
+
+  useEffect(() => {
     const persisted = window.localStorage.getItem(modelStorageKey);
     if (!persisted) {
       return;
@@ -1996,20 +2088,20 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
       if (
         parsed.primaryModelId &&
-        modelAllowlist.includes(parsed.primaryModelId)
+        normalizedModelAllowlist.includes(parsed.primaryModelId)
       ) {
         setPrimaryModelId(parsed.primaryModelId);
       }
       if (
         parsed.fallbackModelId &&
-        modelAllowlist.includes(parsed.fallbackModelId)
+        normalizedModelAllowlist.includes(parsed.fallbackModelId)
       ) {
         setFallbackModelId(parsed.fallbackModelId);
       }
     } catch {
       window.localStorage.removeItem(modelStorageKey);
     }
-  }, [modelAllowlist, modelStorageKey]);
+  }, [modelStorageKey, normalizedModelAllowlist]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -3289,7 +3381,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                           label={selector.label}
                           value={selector.value}
                           keyPrefix={selector.keyPrefix}
-                          modelAllowlist={modelAllowlist}
+                          modelAllowlist={normalizedModelAllowlist}
                           onValueChange={selector.onValueChange}
                         />
                       ))}
@@ -3309,10 +3401,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 <MonacoEditor
                   path={`file:///workspace/${selectedPath}`}
                   value={currentFile?.content ?? ""}
-                  language={
-                    languageMap[currentFile?.language ?? "unknown"] ??
-                    "plaintext"
-                  }
+                  language={currentMonacoLanguage}
                   theme={monacoTheme}
                   options={{
                     readOnly: !isEditable || isAuditWriteLocked,

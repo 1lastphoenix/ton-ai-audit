@@ -365,15 +365,15 @@ async function executeStep(step, workspaceDir, metadata) {
 
     await ensureDeterministicBlueprintWorkspace(workspaceDir, metadata);
     const check = await runMappedCommand(step, workspaceDir, {
-      command: "create-ton",
-      args: ["--help"]
+      command: "which",
+      args: ["create-ton"]
     });
 
     return {
       id: step.id,
       action: step.action,
-      command: "create-ton",
-      args: ["--help"],
+      command: "which",
+      args: ["create-ton"],
       status: check.status,
       exitCode: check.exitCode,
       stdout: [check.stdout, `Seed template: ${metadata.seedTemplate}`].filter(Boolean).join("\n"),

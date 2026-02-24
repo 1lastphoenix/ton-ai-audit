@@ -24,7 +24,7 @@ export async function getAuditModelAllowlist(): Promise<string[]> {
   const fromSetting = Array.isArray((setting?.value as { models?: unknown[] } | null)?.models)
     ? ((setting?.value as { models: unknown[] }).models ?? [])
         .map((item) => String(item).trim())
-        .filter(Boolean)
+        .filter((model, index, entries) => Boolean(model) && entries.indexOf(model) === index)
     : [];
 
   const result = fromSetting.length ? fromSetting : env.AUDIT_MODEL_ALLOWLIST;
