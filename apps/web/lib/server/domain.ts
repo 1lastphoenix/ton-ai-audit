@@ -145,6 +145,105 @@ describe("main contract", () => {
   ];
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getErrorName(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" ? name : null;
+}
+
+function getErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function getErrorStatusCode(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const metadata = (error as { $metadata?: unknown }).$metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const statusCode = (metadata as { httpStatusCode?: unknown }).httpStatusCode;
+  return typeof statusCode === "number" ? statusCode : null;
+}
+
+function isRetryableStorageError(error: unknown): boolean {
+  const statusCode = getErrorStatusCode(error);
+  if (statusCode !== null && [408, 425, 429, 500, 502, 503, 504].includes(statusCode)) {
+    return true;
+  }
+
+  const name = getErrorName(error);
+  if (!name) {
+    return false;
+  }
+
+  return [
+    "TimeoutError",
+    "NetworkingError",
+    "RequestTimeout",
+    "ServiceUnavailable",
+    "InternalError",
+    "SlowDown"
+  ].includes(name);
+}
+
+function isPgUniqueViolation(error: unknown, constraint?: string): boolean {
+  const code = getErrorCode(error);
+  if (code !== "23505") {
+    return false;
+  }
+
+  if (!constraint) {
+    return true;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const violatedConstraint = (error as { constraint?: unknown }).constraint;
+  return violatedConstraint === constraint;
+}
+
+async function putObjectWithRetry(
+  params: Parameters<typeof putObject>[0],
+  maxAttempts = 3
+) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await putObject(params);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableStorageError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+
+      await sleep(attempt * 200);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Failed to upload file blob");
+}
+
 async function storeFileBlob(params: { revisionId: string; content: string }) {
   const sha = createContentFingerprint(params.content);
 
@@ -156,27 +255,41 @@ async function storeFileBlob(params: { revisionId: string; content: string }) {
   }
 
   const s3Key = `revisions/${params.revisionId}/files/${randomUUID()}`;
-  await putObject({
+  await putObjectWithRetry({
     key: s3Key,
     body: params.content,
     contentType: "text/plain; charset=utf-8"
   });
 
-  const [createdBlob] = await db
-    .insert(fileBlobs)
-    .values({
-      sha256: sha,
-      sizeBytes: Buffer.byteLength(params.content, "utf8"),
-      s3Key,
-      contentType: "text/plain; charset=utf-8"
-    })
-    .returning();
+  try {
+    const [createdBlob] = await db
+      .insert(fileBlobs)
+      .values({
+        sha256: sha,
+        sizeBytes: Buffer.byteLength(params.content, "utf8"),
+        s3Key,
+        contentType: "text/plain; charset=utf-8"
+      })
+      .returning();
 
-  if (!createdBlob) {
-    throw new Error("Failed to persist file blob");
+    if (!createdBlob) {
+      throw new Error("Failed to persist file blob");
+    }
+
+    return createdBlob;
+  } catch (error) {
+    if (isPgUniqueViolation(error, "file_blobs_sha_unique")) {
+      const concurrentBlob = await db.query.fileBlobs.findFirst({
+        where: eq(fileBlobs.sha256, sha)
+      });
+
+      if (concurrentBlob) {
+        return concurrentBlob;
+      }
+    }
+
+    throw error;
   }
-
-  return createdBlob;
 }
 
 export async function createScaffoldRevision(params: {
@@ -452,37 +565,12 @@ export async function snapshotWorkingCopyAndCreateAuditRun(params: {
   if (files.length) {
     const insertedBlobs = await Promise.all(
       files.map(async (file) => {
-        const sha = createContentFingerprint(file.content);
-        const existing = await db.query.fileBlobs.findFirst({
-          where: eq(fileBlobs.sha256, sha)
+        const blob = await storeFileBlob({
+          revisionId: revision.id,
+          content: file.content
         });
 
-        if (existing) {
-          return existing;
-        }
-
-        const s3Key = `revisions/${revision.id}/files/${randomUUID()}`;
-        await putObject({
-          key: s3Key,
-          body: file.content,
-          contentType: "text/plain; charset=utf-8"
-        });
-
-        const [createdBlob] = await db
-          .insert(fileBlobs)
-          .values({
-            sha256: sha,
-            sizeBytes: Buffer.byteLength(file.content, "utf8"),
-            s3Key,
-            contentType: "text/plain; charset=utf-8"
-          })
-          .returning();
-
-        if (!createdBlob) {
-          throw new Error(`Failed to persist blob for ${file.path}`);
-        }
-
-        return createdBlob;
+        return blob;
       })
     );
 

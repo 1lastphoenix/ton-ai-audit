@@ -62,6 +62,66 @@ function getPgConstraint(error: unknown) {
   return typeof constraint === "string" ? constraint : null;
 }
 
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function getAwsErrorName(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" ? name : null;
+}
+
+function getAwsErrorStatusCode(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const metadata = (error as { $metadata?: unknown }).$metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const statusCode = (metadata as { httpStatusCode?: unknown }).httpStatusCode;
+  return typeof statusCode === "number" ? statusCode : null;
+}
+
+function isStorageAuthError(error: unknown) {
+  const awsName = getAwsErrorName(error);
+  const code = getErrorCode(error);
+  return (
+    awsName === "SignatureDoesNotMatch" ||
+    awsName === "InvalidAccessKeyId" ||
+    awsName === "AccessDenied" ||
+    code === "SignatureDoesNotMatch" ||
+    code === "InvalidAccessKeyId" ||
+    code === "AccessDenied"
+  );
+}
+
+function isStorageUnavailableError(error: unknown) {
+  const statusCode = getAwsErrorStatusCode(error);
+  if (statusCode !== null && [408, 425, 429, 500, 502, 503, 504].includes(statusCode)) {
+    return true;
+  }
+
+  const awsName = getAwsErrorName(error);
+  return (
+    awsName === "TimeoutError" ||
+    awsName === "NetworkingError" ||
+    awsName === "RequestTimeout" ||
+    awsName === "ServiceUnavailable"
+  );
+}
+
 export function toApiErrorResponse(error: unknown) {
   if (error instanceof ApiError) {
     return jsonError(error.message, error.statusCode);
@@ -86,6 +146,14 @@ export function toApiErrorResponse(error: unknown) {
     typeof (error as { statusCode?: unknown }).statusCode === "number"
   ) {
     return jsonError(error.message, (error as { statusCode: number }).statusCode);
+  }
+
+  if (isStorageAuthError(error)) {
+    return jsonError("Object storage authentication failed. Check MinIO credentials.", 503);
+  }
+
+  if (isStorageUnavailableError(error)) {
+    return jsonError("Object storage is unavailable. Please retry.", 503);
   }
 
   if (error instanceof Error) {

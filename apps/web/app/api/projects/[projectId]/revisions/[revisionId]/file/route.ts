@@ -53,12 +53,15 @@ export async function GET(
     }
 
     const content = await getObjectText(row.s3Key);
+    if (content === null) {
+      return NextResponse.json({ error: "File content not found" }, { status: 404 });
+    }
 
     return NextResponse.json({
       file: {
         path: row.path,
         language: row.language,
-        content: content ?? ""
+        content
       }
     });
   } catch (error) {

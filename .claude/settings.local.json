@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/baghe/OneDrive/Desktop/frontend-template/app/apps/web/components/*.tsx)"
+    ]
+  }
+}

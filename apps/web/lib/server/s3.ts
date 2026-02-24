@@ -44,6 +44,39 @@ function getBucketName() {
   return getEnv().MINIO_BUCKET;
 }
 
+function getS3ErrorStatusCode(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const metadata = (error as { $metadata?: unknown }).$metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const statusCode = (metadata as { httpStatusCode?: unknown }).httpStatusCode;
+  return typeof statusCode === "number" ? statusCode : null;
+}
+
+function getS3ErrorName(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" ? name : null;
+}
+
+function isS3NotFoundError(error: unknown): boolean {
+  const statusCode = getS3ErrorStatusCode(error);
+  if (statusCode === 404) {
+    return true;
+  }
+
+  const name = getS3ErrorName(error);
+  return name === "NoSuchKey" || name === "NotFound" || name === "NoSuchBucket";
+}
+
 export async function createMultipartUpload(params: {
   key: string;
   contentType: string;
@@ -164,12 +197,21 @@ export async function deleteObject(key: string) {
 
 export async function getObjectText(key: string): Promise<string | null> {
   const s3Client = getS3Client();
-  const response = await s3Client.send(
-    new GetObjectCommand({
-      Bucket: getBucketName(),
-      Key: key
-    })
-  );
+  let response;
+  try {
+    response = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: getBucketName(),
+        Key: key
+      })
+    );
+  } catch (error) {
+    if (isS3NotFoundError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
 
   if (!response.Body) {
     return null;

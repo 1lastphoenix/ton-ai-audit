@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/baghe/OneDrive/Desktop/frontend-template/**)"
+    ]
+  }
+}
