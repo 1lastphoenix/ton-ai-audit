@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -25,6 +28,7 @@ const preflight = require("../../../scripts/local-dev-preflight.mjs") as {
   findMissingRequiredEnv: (envObject: Record<string, string>) => string[];
   parseDotEnv: (content: string) => Record<string, string>;
   requiredEnvKeys: string[];
+  resetNextDevArtifacts: (workspaceRoot?: string) => string[];
 };
 
 const {
@@ -39,7 +43,8 @@ const {
   findMissingRequiredEnv,
   parseDotEnv,
   requiredEnvKeys,
-  localComposeServices
+  localComposeServices,
+  resetNextDevArtifacts
 } = preflight;
 
 describe("local dev preflight env helpers", () => {
@@ -238,5 +243,37 @@ MINIO_BUCKET=ton-audit
         }
       )
     ).rejects.toThrow(/cannot access bucket/i);
+  });
+
+  it("clears Next.js dev artifacts used by Turbopack cache", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ton-audit-preflight-"));
+    const nextRoot = path.join(tempRoot, "apps", "web", ".next");
+    const cacheDir = path.join(nextRoot, "cache");
+    const turboDir = path.join(nextRoot, "turbopack");
+    const devCacheDir = path.join(nextRoot, "dev", "cache");
+    const devTurboDir = path.join(nextRoot, "dev", "turbopack");
+    const devLockPath = path.join(nextRoot, "dev", "lock");
+
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.mkdirSync(turboDir, { recursive: true });
+    fs.mkdirSync(devCacheDir, { recursive: true });
+    fs.mkdirSync(devTurboDir, { recursive: true });
+    fs.mkdirSync(path.dirname(devLockPath), { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "data.bin"), "cache");
+    fs.writeFileSync(path.join(devCacheDir, "data.bin"), "cache");
+    fs.writeFileSync(devLockPath, String(process.pid));
+
+    const clearedTargets = resetNextDevArtifacts(tempRoot);
+    expect(clearedTargets).toEqual(
+      expect.arrayContaining([cacheDir, turboDir, devCacheDir, devTurboDir, devLockPath])
+    );
+
+    expect(fs.existsSync(cacheDir)).toBe(false);
+    expect(fs.existsSync(turboDir)).toBe(false);
+    expect(fs.existsSync(devCacheDir)).toBe(false);
+    expect(fs.existsSync(devTurboDir)).toBe(false);
+    expect(fs.existsSync(devLockPath)).toBe(false);
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });

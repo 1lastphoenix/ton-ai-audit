@@ -414,6 +414,31 @@ function isWebDevAlreadyRunning(webLockPath) {
   }
 }
 
+function removePathIfPresent(targetPath) {
+  try {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+  } catch (error) {
+    throw new Error(`Failed to clear '${targetPath}': ${toErrorMessage(error)}`);
+  }
+}
+
+export function resetNextDevArtifacts(workspaceRoot = process.cwd()) {
+  const nextRoot = path.resolve(workspaceRoot, "apps", "web", ".next");
+  const targets = [
+    path.join(nextRoot, "cache"),
+    path.join(nextRoot, "turbopack"),
+    path.join(nextRoot, "dev", "cache"),
+    path.join(nextRoot, "dev", "turbopack"),
+    path.join(nextRoot, "dev", "lock")
+  ];
+
+  for (const target of targets) {
+    removePathIfPresent(target);
+  }
+
+  return targets;
+}
+
 async function canReachHttpOk(url, timeoutMs = 1_500) {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
@@ -749,7 +774,8 @@ export async function runLocalDevPreflight(options = {}) {
     }
 
     const filters = [];
-    if (!webAlreadyRunning) {
+    const shouldStartWeb = !webAlreadyRunning;
+    if (shouldStartWeb) {
       filters.push("--filter @ton-audit/web");
     }
     if (!workerAlreadyRunning) {
@@ -757,7 +783,28 @@ export async function runLocalDevPreflight(options = {}) {
     }
 
     const serveCommand = `pnpm --parallel ${filters.join(" ")} dev`;
-    await runCommandStreaming(serveCommand, envFromFile);
+    try {
+      await runCommandStreaming(serveCommand, envFromFile);
+    } catch (error) {
+      if (!shouldStartWeb) {
+        throw error;
+      }
+
+      // eslint-disable-next-line no-console
+      console.warn("Dev server startup failed. Clearing Next.js dev artifacts and retrying once.");
+      const clearedTargets = resetNextDevArtifacts();
+      // eslint-disable-next-line no-console
+      console.warn(`Cleared: ${clearedTargets.join(", ")}`);
+
+      const workerNowRunning = await canReachHttpOk("http://localhost:3010/healthz");
+      const retryFilters = ["--filter @ton-audit/web"];
+      if (!workerNowRunning) {
+        retryFilters.push("--filter @ton-audit/worker");
+      }
+
+      const retryCommand = `pnpm --parallel ${retryFilters.join(" ")} dev`;
+      await runCommandStreaming(retryCommand, envFromFile);
+    }
   }
 }
 
