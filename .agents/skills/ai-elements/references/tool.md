@@ -67,7 +67,7 @@ const Example = () => {
 
   const latestMessage = messages[messages.length - 1];
   const weatherTool = latestMessage?.parts?.find(
-    (part) => part.type === "tool-fetch_weather_data"
+    (part) => part.type === "tool-fetch_weather_data",
   ) as WeatherToolUIPart | undefined;
 
   return (
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
 
   const result = streamText({
-    model: "openai/gpt-4o",
+    model: "google/gemini-2.5-flash",
     messages: await convertToModelMessages(messages),
     tools: {
       fetch_weather_data: {
@@ -215,41 +215,41 @@ See `scripts/tool-output-error.tsx` for this example.
 
 ### `<Tool />`
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `...props` | `React.ComponentProps<typeof Collapsible>` | - | Any other props are spread to the root Collapsible component. |
+| Prop       | Type                                       | Default | Description                                                   |
+| ---------- | ------------------------------------------ | ------- | ------------------------------------------------------------- |
+| `...props` | `React.ComponentProps<typeof Collapsible>` | -       | Any other props are spread to the root Collapsible component. |
 
 ### `<ToolHeader />`
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `title` | `string` | - | Custom title to display instead of the derived tool name. |
-| `type` | `ToolUIPart[` | Required | The type/name of the tool. |
-| `state` | `ToolUIPart[` | Required | The current state of the tool (input-streaming, input-available, output-available, or output-error). |
-| `toolName` | `string` | - | Required when type is  |
-| `className` | `string` | - | Additional CSS classes to apply to the header. |
-| `...props` | `React.ComponentProps<typeof CollapsibleTrigger>` | - | Any other props are spread to the CollapsibleTrigger. |
+| Prop        | Type                                              | Default  | Description                                                                                          |
+| ----------- | ------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `title`     | `string`                                          | -        | Custom title to display instead of the derived tool name.                                            |
+| `type`      | `ToolUIPart[`                                     | Required | The type/name of the tool.                                                                           |
+| `state`     | `ToolUIPart[`                                     | Required | The current state of the tool (input-streaming, input-available, output-available, or output-error). |
+| `toolName`  | `string`                                          | -        | Required when type is                                                                                |
+| `className` | `string`                                          | -        | Additional CSS classes to apply to the header.                                                       |
+| `...props`  | `React.ComponentProps<typeof CollapsibleTrigger>` | -        | Any other props are spread to the CollapsibleTrigger.                                                |
 
 ### `<ToolContent />`
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `...props` | `React.ComponentProps<typeof CollapsibleContent>` | - | Any other props are spread to the CollapsibleContent. |
+| Prop       | Type                                              | Default | Description                                           |
+| ---------- | ------------------------------------------------- | ------- | ----------------------------------------------------- |
+| `...props` | `React.ComponentProps<typeof CollapsibleContent>` | -       | Any other props are spread to the CollapsibleContent. |
 
 ### `<ToolInput />`
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `input` | `ToolUIPart[` | - | The input parameters passed to the tool, displayed as formatted JSON. |
-| `...props` | `React.ComponentProps<` | - | Any other props are spread to the underlying div. |
+| Prop       | Type                    | Default | Description                                                           |
+| ---------- | ----------------------- | ------- | --------------------------------------------------------------------- |
+| `input`    | `ToolUIPart[`           | -       | The input parameters passed to the tool, displayed as formatted JSON. |
+| `...props` | `React.ComponentProps<` | -       | Any other props are spread to the underlying div.                     |
 
 ### `<ToolOutput />`
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `output` | `React.ReactNode` | - | The output/result of the tool execution. |
-| `errorText` | `ToolUIPart[` | - | An error message if the tool execution failed. |
-| `...props` | `React.ComponentProps<` | - | Any other props are spread to the underlying div. |
+| Prop        | Type                    | Default | Description                                       |
+| ----------- | ----------------------- | ------- | ------------------------------------------------- |
+| `output`    | `React.ReactNode`       | -       | The output/result of the tool execution.          |
+| `errorText` | `ToolUIPart[`           | -       | An error message if the tool execution failed.    |
+| `...props`  | `React.ComponentProps<` | -       | Any other props are spread to the underlying div. |
 
 ## Type Exports
 

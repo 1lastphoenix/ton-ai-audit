@@ -27,6 +27,18 @@ describe("planSandboxVerification", () => {
     expect(plan.languages).toEqual(expect.arrayContaining(["tact", "func", "tolk"]));
   });
 
+  it("uses shorter timeouts for optional blueprint steps in non-blueprint plans", () => {
+    const plan = planSandboxVerification([{ path: "contracts/main.tolk", content: "" }]);
+    const optionalBlueprintSteps = plan.steps.filter(
+      (step) =>
+        step.optional &&
+        (step.action === "blueprint-build" || step.action === "blueprint-test")
+    );
+
+    expect(optionalBlueprintSteps.length).toBeGreaterThan(0);
+    expect(optionalBlueprintSteps.every((step) => step.timeoutMs <= 90_000)).toBe(true);
+  });
+
   it("returns none when no supported files are present", () => {
     const plan = planSandboxVerification([{ path: "README.md", content: "" }]);
 

@@ -13,7 +13,7 @@ import {
   revisions,
   systemSettings,
   type JobPayloadMap,
-  uploads
+  uploads,
 } from "@ton-audit/shared";
 
 import { validateArchiveEntries } from "../archive";
@@ -44,12 +44,12 @@ async function loadArchiveFiles(buffer: Buffer): Promise<ArchiveFile[]> {
   const validatedEntries = validateArchiveEntries(
     rawEntries.map((file) => ({
       path: file.path,
-      sizeBytes: Math.max(file.uncompressedSize ?? 0, 0)
+      sizeBytes: Math.max(file.uncompressedSize ?? 0, 0),
     })),
     {
       maxFiles: env.UPLOAD_MAX_FILES,
-      maxBytes: env.UPLOAD_MAX_BYTES
-    }
+      maxBytes: env.UPLOAD_MAX_BYTES,
+    },
   );
 
   const contentByPath = new Map<string, Buffer>();
@@ -64,7 +64,9 @@ async function loadArchiveFiles(buffer: Buffer): Promise<ArchiveFile[]> {
   return validatedEntries.map((item) => ({
     path: item.normalizedPath,
     sizeBytes: item.sizeBytes,
-    content: (contentByPath.get(item.normalizedPath) ?? Buffer.from("")).toString("utf8")
+    content: (
+      contentByPath.get(item.normalizedPath) ?? Buffer.from("")
+    ).toString("utf8"),
   }));
 }
 
@@ -73,16 +75,21 @@ function buildSingleUploadFile(params: {
   content: Buffer;
 }): ArchiveFile {
   const normalizedPath = normalizePath(params.originalFilename);
-  const filename = normalizedPath || path.basename(params.originalFilename) || "uploaded.txt";
+  const filename =
+    normalizedPath || path.basename(params.originalFilename) || "uploaded.txt";
   const extension = path.extname(filename).toLowerCase();
-  if (!acceptedUploadExtensions.includes(extension as (typeof acceptedUploadExtensions)[number])) {
+  if (
+    !acceptedUploadExtensions.includes(
+      extension as (typeof acceptedUploadExtensions)[number],
+    )
+  ) {
     throw new Error(`Unsupported file extension for ${filename}`);
   }
 
   return {
     path: filename,
     sizeBytes: params.content.byteLength,
-    content: params.content.toString("utf8")
+    content: params.content.toString("utf8"),
   };
 }
 
@@ -91,7 +98,11 @@ async function loadFileSetFiles(manifest: UploadManifestEntry[]) {
   for (const file of manifest) {
     const normalizedPath = normalizePath(file.path);
     const extension = path.extname(normalizedPath).toLowerCase();
-    if (!acceptedUploadExtensions.includes(extension as (typeof acceptedUploadExtensions)[number])) {
+    if (
+      !acceptedUploadExtensions.includes(
+        extension as (typeof acceptedUploadExtensions)[number],
+      )
+    ) {
       continue;
     }
 
@@ -103,7 +114,7 @@ async function loadFileSetFiles(manifest: UploadManifestEntry[]) {
     files.push({
       path: normalizedPath,
       sizeBytes: contentBuffer.byteLength,
-      content: contentBuffer.toString("utf8")
+      content: contentBuffer.toString("utf8"),
     });
   }
 
@@ -112,10 +123,12 @@ async function loadFileSetFiles(manifest: UploadManifestEntry[]) {
 
 async function loadAuditModelAllowlist() {
   const setting = await db.query.systemSettings.findFirst({
-    where: eq(systemSettings.key, "audit_model_allowlist")
+    where: eq(systemSettings.key, "audit_model_allowlist"),
   });
 
-  const fromSetting = Array.isArray((setting?.value as { models?: unknown[] } | null)?.models)
+  const fromSetting = Array.isArray(
+    (setting?.value as { models?: unknown[] } | null)?.models,
+  )
     ? ((setting?.value as { models: unknown[] }).models ?? [])
         .map((item) => String(item).trim())
         .filter(Boolean)
@@ -131,11 +144,14 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
       queue: "ingest",
       jobId: String(job.id),
       event: "started",
-      payload: { data: job.data }
+      payload: { data: job.data },
     });
 
     const upload = await db.query.uploads.findFirst({
-      where: and(eq(uploads.id, job.data.uploadId), eq(uploads.projectId, job.data.projectId))
+      where: and(
+        eq(uploads.id, job.data.uploadId),
+        eq(uploads.projectId, job.data.projectId),
+      ),
     });
 
     if (!upload) {
@@ -143,7 +159,10 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
     }
 
     const revision = await db.query.revisions.findFirst({
-      where: and(eq(revisions.id, job.data.revisionId), eq(revisions.projectId, job.data.projectId))
+      where: and(
+        eq(revisions.id, job.data.revisionId),
+        eq(revisions.projectId, job.data.projectId),
+      ),
     });
 
     if (!revision) {
@@ -166,11 +185,19 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           ? await loadArchiveFiles(payloadBuffer)
           : upload.type === "file-set"
             ? await loadFileSetFiles(
-                Array.isArray((upload.metadata as { files?: unknown[] } | null)?.files)
-                  ? ((upload.metadata as { files: UploadManifestEntry[] }).files ?? [])
-                  : []
+                Array.isArray(
+                  (upload.metadata as { files?: unknown[] } | null)?.files,
+                )
+                  ? ((upload.metadata as { files: UploadManifestEntry[] })
+                      .files ?? [])
+                  : [],
               )
-            : [buildSingleUploadFile({ originalFilename: upload.originalFilename, content: payloadBuffer })];
+            : [
+                buildSingleUploadFile({
+                  originalFilename: upload.originalFilename,
+                  content: payloadBuffer,
+                }),
+              ];
 
       if (!files.length) {
         throw new Error("No supported source files found in upload");
@@ -184,13 +211,18 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           revisionId: revision.id,
           path: normalizedPath,
           language: detectLanguageFromPath(normalizedPath),
-          isTestFile: /(^|\/)(test|tests|__tests__)\/|\.spec\./i.test(normalizedPath),
-          content: file.content
+          isTestFile: /(^|\/)(test|tests|__tests__)\/|\.spec\./i.test(
+            normalizedPath,
+          ),
+          content: file.content,
         });
       }
 
       let auditRun = await db.query.auditRuns.findFirst({
-        where: and(eq(auditRuns.projectId, revision.projectId), eq(auditRuns.revisionId, revision.id))
+        where: and(
+          eq(auditRuns.projectId, revision.projectId),
+          eq(auditRuns.revisionId, revision.id),
+        ),
       });
 
       if (!auditRun) {
@@ -202,11 +234,11 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
             revisionId: revision.id,
             status: "queued",
             requestedByUserId: job.data.requestedByUserId,
-            primaryModelId: modelAllowlist[0] ?? "openai/gpt-5",
+            primaryModelId: modelAllowlist[0] ?? "google/gemini-2.5-flash",
             fallbackModelId:
               modelAllowlist[1] ??
               modelAllowlist[0] ??
-              "openai/gpt-5-mini"
+              "google/gemini-2.5-flash",
           })
           .returning();
 
@@ -221,7 +253,7 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         .update(uploads)
         .set({
           status: "processed",
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(uploads.id, upload.id));
 
@@ -230,9 +262,14 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         .set({
           lifecycleState: "ready",
           deletedAt: null,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
-        .where(and(eq(projects.id, revision.projectId), eq(projects.lifecycleState, "initializing")));
+        .where(
+          and(
+            eq(projects.id, revision.projectId),
+            eq(projects.lifecycleState, "initializing"),
+          ),
+        );
 
       await deps.enqueueJob(
         "verify",
@@ -240,9 +277,9 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           projectId: revision.projectId,
           revisionId: revision.id,
           auditRunId: auditRun.id,
-          includeDocsFallbackFetch: true
+          includeDocsFallbackFetch: true,
         },
-        `verify:${revision.projectId}:${auditRun.id}`
+        `verify:${revision.projectId}:${auditRun.id}`,
       );
 
       await recordJobEvent({
@@ -253,17 +290,21 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         payload: {
           revisionId: revision.id,
           auditRunId: auditRun.id,
-          fileCount: files.length
-        }
+          fileCount: files.length,
+        },
       });
 
-      return { revisionId: revision.id, auditRunId: auditRun.id, fileCount: files.length };
+      return {
+        revisionId: revision.id,
+        auditRunId: auditRun.id,
+        fileCount: files.length,
+      };
     } catch (error) {
       await db
         .update(uploads)
         .set({
           status: "failed",
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(uploads.id, upload.id));
 
@@ -272,9 +313,14 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         .set({
           lifecycleState: "deleted",
           deletedAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
-        .where(and(eq(projects.id, job.data.projectId), eq(projects.lifecycleState, "initializing")));
+        .where(
+          and(
+            eq(projects.id, job.data.projectId),
+            eq(projects.lifecycleState, "initializing"),
+          ),
+        );
 
       await recordJobEvent({
         projectId: job.data.projectId,
@@ -283,8 +329,9 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         event: "failed",
         payload: {
           uploadId: upload.id,
-          message: error instanceof Error ? error.message : "Unknown ingest failure"
-        }
+          message:
+            error instanceof Error ? error.message : "Unknown ingest failure",
+        },
       });
 
       throw error;

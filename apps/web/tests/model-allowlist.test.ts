@@ -5,13 +5,19 @@ import { assertAllowedModel } from "../lib/server/model-allowlist-core";
 describe("assertAllowedModel", () => {
   it("accepts allowlisted model", () => {
     expect(() =>
-      assertAllowedModel("openai/gpt-5", ["openai/gpt-5", "openai/gpt-5-mini"])
+      assertAllowedModel("google/gemini-2.5-flash", [
+        "google/gemini-2.5-flash",
+        "google/gemini-2.5-flash",
+      ]),
     ).not.toThrow();
   });
 
   it("rejects model outside allowlist", () => {
     expect(() =>
-      assertAllowedModel("anthropic/claude-sonnet-4", ["openai/gpt-5", "openai/gpt-5-mini"])
+      assertAllowedModel("anthropic/claude-sonnet-4", [
+        "google/gemini-2.5-flash",
+        "google/gemini-2.5-flash",
+      ]),
     ).toThrow(/allowlist/i);
   });
 });

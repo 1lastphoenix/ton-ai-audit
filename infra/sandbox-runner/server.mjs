@@ -28,12 +28,34 @@ const allowedActions = new Set([
 const bootstrapTemplates = new Set(["tact-empty", "tolk-empty", "func-empty"]);
 
 const actionCommandMap = {
-  "blueprint-build": { command: "blueprint", args: ["build"] },
+  "blueprint-build": { command: "blueprint", args: ["build", "--all"] },
   "blueprint-test": { command: "blueprint", args: ["test"] },
   "tact-check": { command: "tact", args: ["--version"] },
   "func-check": { command: "func-js", args: ["--version"] },
   "tolk-check": { command: "tolk-js", args: ["--help"] }
 };
+
+function terminateProcessTree(pid, signal) {
+  if (!pid || pid <= 0) {
+    return;
+  }
+
+  // On Linux, kill the full process group to avoid orphaned subprocesses.
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // Fall through to direct PID signal.
+    }
+  }
+
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Ignore already-exited process errors.
+  }
+}
 
 function readBody(request) {
   return new Promise((resolve, reject) => {
@@ -217,23 +239,30 @@ function runProcess(params) {
     const child = spawn(params.command, params.args, {
       cwd: params.cwd,
       shell: false,
+      detached: process.platform !== "win32",
       env: {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
         USERPROFILE: process.env.USERPROFILE,
         TMPDIR: process.env.TMPDIR,
         TEMP: process.env.TEMP,
-        TMP: process.env.TMP
+        TMP: process.env.TMP,
+        CI: "1"
       }
     });
+    child.stdin?.end();
 
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let forceKillTimeout = null;
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      terminateProcessTree(child.pid, "SIGTERM");
+      forceKillTimeout = setTimeout(() => {
+        terminateProcessTree(child.pid, "SIGKILL");
+      }, 1_500);
     }, params.timeoutMs);
 
     child.stdout.on("data", (chunk) => {
@@ -252,6 +281,9 @@ function runProcess(params) {
 
     child.on("error", (error) => {
       clearTimeout(timeout);
+      if (forceKillTimeout) {
+        clearTimeout(forceKillTimeout);
+      }
       resolve({
         status: "failed",
         exitCode: null,
@@ -263,6 +295,9 @@ function runProcess(params) {
 
     child.on("close", (code) => {
       clearTimeout(timeout);
+      if (forceKillTimeout) {
+        clearTimeout(forceKillTimeout);
+      }
       resolve({
         status: timedOut ? "timeout" : code === 0 ? "completed" : "failed",
         exitCode: code,

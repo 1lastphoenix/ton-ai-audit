@@ -9,13 +9,26 @@ import type {
 
 const DEFAULT_BUILD_TIMEOUT_MS = 8 * 60 * 1000;
 const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 3 * 60 * 1000;
+const OPTIONAL_BLUEPRINT_TIMEOUT_MS = 90 * 1000;
 
 function createStep(
   id: string,
   action: SandboxStepAction,
   optional = false,
-  timeoutMs =
-    action === "bootstrap-create-ton" ? DEFAULT_BOOTSTRAP_TIMEOUT_MS : DEFAULT_BUILD_TIMEOUT_MS
+  timeoutMs = (() => {
+    if (action === "bootstrap-create-ton") {
+      return DEFAULT_BOOTSTRAP_TIMEOUT_MS;
+    }
+
+    if (
+      optional &&
+      (action === "blueprint-build" || action === "blueprint-test")
+    ) {
+      return OPTIONAL_BLUEPRINT_TIMEOUT_MS;
+    }
+
+    return DEFAULT_BUILD_TIMEOUT_MS;
+  })()
 ): SandboxStep {
   return {
     id,

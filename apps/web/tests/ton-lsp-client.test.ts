@@ -27,4 +27,12 @@ describe("ton lsp client bootstrap", () => {
     expect(source).toContain("if (typeof client.isRunning === \"function\" && !client.isRunning())");
     expect(source).toContain("await client.start()");
   });
+
+  it("rotates websocket fallback host only once per failed connect attempt", () => {
+    const filePath = path.resolve(process.cwd(), "lib", "editor", "ton-lsp-client.ts");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("let rotatedCandidateForAttempt = false;");
+    expect(source).toContain("const rotateCandidateOnce = () => {");
+  });
 });

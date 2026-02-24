@@ -214,6 +214,15 @@ export function startTonLspClient(params: {
     const socket = new WebSocket(wsUrl);
     webSocket = socket;
     let opened = false;
+    let rotatedCandidateForAttempt = false;
+
+    const rotateCandidateOnce = () => {
+      if (rotatedCandidateForAttempt) {
+        return;
+      }
+      rotatedCandidateForAttempt = true;
+      rotateWsCandidate();
+    };
 
     socket.addEventListener("open", () => {
       opened = true;
@@ -297,7 +306,7 @@ export function startTonLspClient(params: {
 
     socket.addEventListener("error", (event) => {
       if (!opened) {
-        rotateWsCandidate();
+        rotateCandidateOnce();
       }
       reportError(`TON LSP WebSocket connection error (${wsUrl}).`, event);
     });
@@ -306,7 +315,7 @@ export function startTonLspClient(params: {
       await stopClient();
       if (!disposed) {
         if (!opened) {
-          rotateWsCandidate();
+          rotateCandidateOnce();
         }
         params.onStatus("disconnected");
         scheduleReconnect();

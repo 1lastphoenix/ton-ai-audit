@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type ReactNode
+  type ReactNode,
 } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
@@ -35,10 +35,14 @@ import {
   TerminalSquare,
   Upload,
   X,
-  type LucideIcon
+  type LucideIcon,
 } from "lucide-react";
 
-import { detectLanguageFromPath, normalizePath, type Language } from "@ton-audit/shared";
+import {
+  detectLanguageFromPath,
+  normalizePath,
+  type Language,
+} from "@ton-audit/shared";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +51,7 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
-  ContextMenuTrigger
+  ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
   DropdownMenu,
@@ -60,21 +64,26 @@ import {
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   registerTonLanguages,
   startTonLspClient,
-  type TonLspStatus
+  type TonLspStatus,
 } from "@/lib/editor/ton-lsp-client";
 import { cn } from "@/lib/utils";
 import {
   filterWorkbenchTree,
   resolveMonacoTheme,
-  type WorkbenchTreeNode
+  type WorkbenchTreeNode,
 } from "@/components/workbench/workbench-ui-utils";
 
 type TreeNode = WorkbenchTreeNode;
@@ -254,7 +263,7 @@ type RailToggleConfig = {
 
 const bottomPanelTabConfig = [
   { id: "audit-log", label: "Audit Log", icon: TerminalSquare },
-  { id: "problems", label: "Problems", icon: CircleAlert }
+  { id: "problems", label: "Problems", icon: CircleAlert },
 ] as const satisfies ReadonlyArray<{
   id: "audit-log" | "problems";
   label: string;
@@ -275,7 +284,9 @@ function WorkbenchTooltip(props: {
       <TooltipTrigger asChild>
         <span className="inline-flex">{props.children}</span>
       </TooltipTrigger>
-      <TooltipContent side={props.side ?? "bottom"}>{props.content}</TooltipContent>
+      <TooltipContent side={props.side ?? "bottom"}>
+        {props.content}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -296,7 +307,9 @@ function RailToggleButton(props: {
         size="icon-sm"
         variant={props.active ? "default" : "ghost"}
         className={cn(
-          props.active ? "bg-accent text-accent-foreground hover:bg-accent/80" : "text-muted-foreground"
+          props.active
+            ? "bg-accent text-accent-foreground hover:bg-accent/80"
+            : "text-muted-foreground",
         )}
         onClick={props.onClick}
         aria-label={props.ariaLabel}
@@ -318,9 +331,15 @@ function ModelSelectorSubmenu(props: {
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>{props.label}</DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-64">
-        <DropdownMenuRadioGroup value={props.value} onValueChange={props.onValueChange}>
+        <DropdownMenuRadioGroup
+          value={props.value}
+          onValueChange={props.onValueChange}
+        >
           {props.modelAllowlist.map((model) => (
-            <DropdownMenuRadioItem key={`${props.keyPrefix}-${model}`} value={model}>
+            <DropdownMenuRadioItem
+              key={`${props.keyPrefix}-${model}`}
+              value={model}
+            >
               {model}
             </DropdownMenuRadioItem>
           ))}
@@ -334,7 +353,7 @@ const MonacoEditor = dynamic(
   async () => {
     const [monacoReactModule, monacoModule] = await Promise.all([
       import("@monaco-editor/react"),
-      import("monaco-editor")
+      import("monaco-editor"),
     ]);
 
     monacoReactModule.loader.config({ monaco: monacoModule });
@@ -344,9 +363,11 @@ const MonacoEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="text-muted-foreground grid h-full place-items-center text-sm">Loading editor...</div>
-    )
-  }
+      <div className="text-muted-foreground grid h-full place-items-center text-sm">
+        Loading editor...
+      </div>
+    ),
+  },
 );
 
 const languageMap: Record<string, string> = {
@@ -355,7 +376,7 @@ const languageMap: Record<string, string> = {
   tact: "tact",
   fift: "fift",
   "tl-b": "tl-b",
-  unknown: "plaintext"
+  unknown: "plaintext",
 };
 
 function treeFiles(nodes: TreeNode[]): string[] {
@@ -404,7 +425,7 @@ function buildTreeFromPaths(paths: string[]): TreeNode[] {
           name: part,
           path: currentPath,
           type: isLeaf ? "file" : "directory",
-          children: new Map<string, MutableNode>()
+          children: new Map<string, MutableNode>(),
         });
       }
 
@@ -421,37 +442,33 @@ function buildTreeFromPaths(paths: string[]): TreeNode[] {
       return {
         name: node.name,
         path: node.path,
-        type: "file"
+        type: "file",
       };
     }
 
-    const children = [...node.children.values()]
-      .map(toNode)
-      .sort((a, b) => {
-        if (a.type !== b.type) {
-          return a.type === "directory" ? -1 : 1;
-        }
-
-        return a.name.localeCompare(b.name);
-      });
-
-    return {
-      name: node.name,
-      path: node.path,
-      type: "directory",
-      children
-    };
-  };
-
-  return [...root.values()]
-    .map(toNode)
-    .sort((a, b) => {
+    const children = [...node.children.values()].map(toNode).sort((a, b) => {
       if (a.type !== b.type) {
         return a.type === "directory" ? -1 : 1;
       }
 
       return a.name.localeCompare(b.name);
     });
+
+    return {
+      name: node.name,
+      path: node.path,
+      type: "directory",
+      children,
+    };
+  };
+
+  return [...root.values()].map(toNode).sort((a, b) => {
+    if (a.type !== b.type) {
+      return a.type === "directory" ? -1 : 1;
+    }
+
+    return a.name.localeCompare(b.name);
+  });
 }
 
 function severityTone(severity: string) {
@@ -574,11 +591,13 @@ function createIdleVerifyProgress(): VerifyProgressState {
     toolchain: null,
     sandboxAdapter: null,
     mode: null,
-    steps: []
+    steps: [],
   };
 }
 
-function isVerifyProgressStepStatus(value: unknown): value is VerifyProgressStepStatus {
+function isVerifyProgressStepStatus(
+  value: unknown,
+): value is VerifyProgressStepStatus {
   return (
     value === "pending" ||
     value === "running" ||
@@ -589,22 +608,34 @@ function isVerifyProgressStepStatus(value: unknown): value is VerifyProgressStep
   );
 }
 
-function parseVerifyProgressStep(raw: unknown, fallbackId: string): VerifyProgressStep | null {
+function parseVerifyProgressStep(
+  raw: unknown,
+  fallbackId: string,
+): VerifyProgressStep | null {
   if (!raw || typeof raw !== "object") {
     return null;
   }
 
   const payload = raw as Record<string, unknown>;
-  const id = typeof payload.id === "string" && payload.id.trim() ? payload.id.trim() : fallbackId;
-  const action = typeof payload.action === "string" && payload.action.trim() ? payload.action.trim() : id;
-  const status = isVerifyProgressStepStatus(payload.status) ? payload.status : "pending";
+  const id =
+    typeof payload.id === "string" && payload.id.trim()
+      ? payload.id.trim()
+      : fallbackId;
+  const action =
+    typeof payload.action === "string" && payload.action.trim()
+      ? payload.action.trim()
+      : id;
+  const status = isVerifyProgressStepStatus(payload.status)
+    ? payload.status
+    : "pending";
   const optional = Boolean(payload.optional);
   const timeoutMs =
     typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs)
       ? Math.max(0, Math.trunc(payload.timeoutMs))
       : 0;
   const durationMs =
-    typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs)
+    typeof payload.durationMs === "number" &&
+    Number.isFinite(payload.durationMs)
       ? Math.max(0, Math.trunc(payload.durationMs))
       : null;
 
@@ -614,7 +645,7 @@ function parseVerifyProgressStep(raw: unknown, fallbackId: string): VerifyProgre
     status,
     optional,
     timeoutMs,
-    durationMs
+    durationMs,
   };
 }
 
@@ -633,7 +664,7 @@ function summarizeVerifyProgress(steps: VerifyProgressStep[]) {
     completed: steps.filter((step) => step.status === "completed").length,
     failed: steps.filter((step) => step.status === "failed").length,
     skipped: steps.filter((step) => step.status === "skipped").length,
-    timeout: steps.filter((step) => step.status === "timeout").length
+    timeout: steps.filter((step) => step.status === "timeout").length,
   };
 }
 
@@ -710,6 +741,20 @@ function buildLspWebSocketUrls(rawUrl?: string) {
       fallback.hostname = "localhost";
       candidates.push(fallback.toString());
     }
+
+    if (typeof window !== "undefined") {
+      const browserHost = window.location.hostname.trim().toLowerCase();
+      const isLoopbackHost =
+        parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      const browserIsLoopback =
+        browserHost === "localhost" || browserHost === "127.0.0.1";
+
+      if (isLoopbackHost && browserHost && !browserIsLoopback) {
+        const browserHostCandidate = new URL(primary);
+        browserHostCandidate.hostname = browserHost;
+        candidates.push(browserHostCandidate.toString());
+      }
+    }
   } catch {
     // Keep primary URL only when parsing fails.
   }
@@ -784,10 +829,10 @@ function TreeView(props: {
     onContextNode = () => undefined,
     parentPath = null,
     inlineNewFileDraft = null,
-    depth = 0
+    depth = 0,
   } = props;
   const shouldRenderInlineNewFile = Boolean(
-    inlineNewFileDraft && inlineNewFileDraft.parentPath === parentPath
+    inlineNewFileDraft && inlineNewFileDraft.parentPath === parentPath,
   );
 
   return (
@@ -803,7 +848,9 @@ function TreeView(props: {
             <Input
               ref={inlineNewFileDraft.inputRef}
               value={inlineNewFileDraft.value}
-              onChange={(event) => inlineNewFileDraft.onChange(event.target.value)}
+              onChange={(event) =>
+                inlineNewFileDraft.onChange(event.target.value)
+              }
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
@@ -840,8 +887,16 @@ function TreeView(props: {
                 className="h-6 w-full justify-start gap-1 rounded px-1 text-left text-xs"
                 style={{ paddingLeft: `${depth * 12 + 4}px` }}
               >
-                {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                {expanded ? <FolderOpen className="size-3.5" /> : <Folder className="size-3.5" />}
+                {expanded ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                {expanded ? (
+                  <FolderOpen className="size-3.5" />
+                ) : (
+                  <Folder className="size-3.5" />
+                )}
                 <span className="truncate">{node.name}</span>
               </Button>
               {expanded ? (
@@ -875,7 +930,7 @@ function TreeView(props: {
                 "h-6 w-full justify-start gap-1 rounded px-1 text-left text-xs",
                 selectedPath === node.path
                   ? "bg-accent text-accent-foreground"
-                  : "text-foreground hover:bg-accent/60"
+                  : "text-foreground hover:bg-accent/60",
               )}
               style={{ paddingLeft: `${depth * 12 + 22}px` }}
             >
@@ -890,12 +945,20 @@ function TreeView(props: {
 }
 
 export function TonWorkbench(props: TonWorkbenchProps) {
-  const { projectId, projectName, initialRevisionId, initialAuditId, modelAllowlist } = props;
+  const {
+    projectId,
+    projectName,
+    initialRevisionId,
+    initialAuditId,
+    modelAllowlist,
+  } = props;
   const router = useRouter();
   const { resolvedTheme } = useTheme();
 
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
-  const lspClientRef = useRef<{ dispose: () => Promise<void> | void } | null>(null);
+  const lspClientRef = useRef<{ dispose: () => Promise<void> | void } | null>(
+    null,
+  );
   const explorerFilterInputRef = useRef<HTMLInputElement | null>(null);
   const [revisionId, setRevisionId] = useState(initialRevisionId);
   const [auditId, setAuditId] = useState(initialAuditId);
@@ -907,18 +970,25 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [expandedDirectories, setExpandedDirectories] = useState<string[]>([]);
   const [dirtyPaths, setDirtyPaths] = useState<string[]>([]);
-  const [fileCache, setFileCache] = useState<Record<string, WorkbenchFileEntry>>({});
+  const [fileCache, setFileCache] = useState<
+    Record<string, WorkbenchFileEntry>
+  >({});
   const [findings, setFindings] = useState<AuditFindingInstance[]>([]);
-  const [rightPanelTab, setRightPanelTab] = useState<"findings" | "audit-history">("findings");
+  const [rightPanelTab, setRightPanelTab] = useState<
+    "findings" | "audit-history"
+  >("findings");
   const [auditHistory, setAuditHistory] = useState<AuditHistoryItem[]>([]);
   const [isAuditHistoryLoading, setIsAuditHistoryLoading] = useState(false);
   const [fromCompareAuditId, setFromCompareAuditId] = useState("");
   const [toCompareAuditId, setToCompareAuditId] = useState("");
-  const [auditCompareResult, setAuditCompareResult] = useState<AuditCompareResponse | null>(null);
+  const [auditCompareResult, setAuditCompareResult] =
+    useState<AuditCompareResponse | null>(null);
   const [isAuditCompareLoading, setIsAuditCompareLoading] = useState(false);
-  const [primaryModelId, setPrimaryModelId] = useState(modelAllowlist[0] ?? "openai/gpt-5");
+  const [primaryModelId, setPrimaryModelId] = useState(
+    modelAllowlist[0] ?? "google/gemini-2.5-flash",
+  );
   const [fallbackModelId, setFallbackModelId] = useState(
-    modelAllowlist[1] ?? modelAllowlist[0] ?? "openai/gpt-5-mini"
+    modelAllowlist[1] ?? modelAllowlist[0] ?? "google/gemini-2.5-flash",
   );
   const [jobState, setJobState] = useState<string>("idle");
   const [auditStatus, setAuditStatus] = useState<string>("idle");
@@ -926,13 +996,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [lspErrorDetail, setLspErrorDetail] = useState<string | null>(null);
   const [activityMessage, setActivityMessage] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [bottomPanelTab, setBottomPanelTab] = useState<"audit-log" | "problems">("audit-log");
+  const [bottomPanelTab, setBottomPanelTab] = useState<
+    "audit-log" | "problems"
+  >("audit-log");
   const [activityFeed, setActivityFeed] = useState<WorkbenchLogEntry[]>([]);
-  const [verifyProgress, setVerifyProgress] = useState<VerifyProgressState>(createIdleVerifyProgress());
+  const [verifyProgress, setVerifyProgress] = useState<VerifyProgressState>(
+    createIdleVerifyProgress(),
+  );
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
   const [isInlineNewFile, setIsInlineNewFile] = useState(false);
   const [inlineNewFileName, setInlineNewFileName] = useState("new-module.tolk");
-  const [inlineNewFileParentPath, setInlineNewFileParentPath] = useState<string | null>(null);
+  const [inlineNewFileParentPath, setInlineNewFileParentPath] = useState<
+    string | null
+  >(null);
   const [contextMenuTargetNode, setContextMenuTargetNode] = useState<{
     path: string;
     type: "file" | "directory";
@@ -954,17 +1030,22 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const uploadInputId = useId();
   const modelStorageKey = `ton-audit:model-selection:${projectId}`;
   const allFiles = useMemo(() => treeFiles(tree), [tree]);
-  const expandedDirectorySet = useMemo(() => new Set(expandedDirectories), [expandedDirectories]);
+  const expandedDirectorySet = useMemo(
+    () => new Set(expandedDirectories),
+    [expandedDirectories],
+  );
   const dirtyPathSet = useMemo(() => new Set(dirtyPaths), [dirtyPaths]);
   const currentFile = selectedPath ? fileCache[selectedPath] : null;
   const auditStatusLabel = toAuditStatusLabel(auditStatus);
-  const isAuditInProgress = auditStatus === "queued" || auditStatus === "running";
+  const isAuditInProgress =
+    auditStatus === "queued" || auditStatus === "running";
   const isAuditWriteLocked = isAuditInProgress || jobState === "queuing";
   const verifyProgressSummary = useMemo(
     () => summarizeVerifyProgress(verifyProgress.steps),
-    [verifyProgress.steps]
+    [verifyProgress.steps],
   );
-  const verifyProgressTotalSteps = verifyProgress.totalSteps || verifyProgress.steps.length;
+  const verifyProgressTotalSteps =
+    verifyProgress.totalSteps || verifyProgress.steps.length;
   const verifyProgressResolvedSteps =
     verifyProgressSummary.completed +
     verifyProgressSummary.failed +
@@ -972,19 +1053,33 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     verifyProgressSummary.timeout;
   const verifyProgressPercent =
     verifyProgressTotalSteps > 0
-      ? Math.round((verifyProgressResolvedSteps / verifyProgressTotalSteps) * 100)
+      ? Math.round(
+          (verifyProgressResolvedSteps / verifyProgressTotalSteps) * 100,
+        )
       : 0;
   const verifyProgressCurrentStep = useMemo(() => {
     if (!verifyProgress.currentStepId) {
       return null;
     }
 
-    return verifyProgress.steps.find((step) => step.id === verifyProgress.currentStepId) ?? null;
+    return (
+      verifyProgress.steps.find(
+        (step) => step.id === verifyProgress.currentStepId,
+      ) ?? null
+    );
   }, [verifyProgress.currentStepId, verifyProgress.steps]);
   const shouldShowVerifyProgress =
-    verifyProgress.phase !== "idle" || verifyProgressTotalSteps > 0 || verifyProgress.steps.length > 0;
-  const filteredTree = useMemo(() => filterWorkbenchTree(tree, explorerQuery), [tree, explorerQuery]);
-  const filteredFilePaths = useMemo(() => treeFiles(filteredTree), [filteredTree]);
+    verifyProgress.phase !== "idle" ||
+    verifyProgressTotalSteps > 0 ||
+    verifyProgress.steps.length > 0;
+  const filteredTree = useMemo(
+    () => filterWorkbenchTree(tree, explorerQuery),
+    [tree, explorerQuery],
+  );
+  const filteredFilePaths = useMemo(
+    () => treeFiles(filteredTree),
+    [filteredTree],
+  );
   const contextMenuParentPath = useMemo(() => {
     if (!contextMenuTargetNode) {
       return null;
@@ -999,7 +1094,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [contextMenuTargetNode]);
   const monacoTheme = useMemo(
     () => resolveMonacoTheme({ resolvedTheme, prefersDark }),
-    [prefersDark, resolvedTheme]
+    [prefersDark, resolvedTheme],
   );
   const workbenchGridClassName = useMemo(() => {
     if (isExplorerVisible && isFindingsVisible) {
@@ -1051,54 +1146,68 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [auditStatus, lastError, lspProblemMessage]);
   const completedAuditHistory = useMemo(
     () => auditHistory.filter((item) => item.status === "completed"),
-    [auditHistory]
+    [auditHistory],
   );
   const activeAuditHistoryItem = useMemo(
     () => auditHistory.find((item) => item.id === auditId) ?? null,
-    [auditHistory, auditId]
+    [auditHistory, auditId],
   );
 
   useEffect(() => {
     fileCacheRef.current = fileCache;
   }, [fileCache]);
 
-  const pushWorkbenchLog = useCallback((level: WorkbenchLogLevel, message: string) => {
-    const entry: WorkbenchLogEntry = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      createdAt: new Date().toISOString(),
-      level,
-      message
-    };
+  const pushWorkbenchLog = useCallback(
+    (level: WorkbenchLogLevel, message: string) => {
+      const entry: WorkbenchLogEntry = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        createdAt: new Date().toISOString(),
+        level,
+        message,
+      };
 
-    setActivityFeed((current) => [entry, ...current].slice(0, 150));
-  }, []);
+      setActivityFeed((current) => [entry, ...current].slice(0, 150));
+    },
+    [],
+  );
 
-  const registerJobIds = useCallback((jobIds: Array<string | null | undefined>) => {
-    const normalized = jobIds
-      .map((item) => (item ? String(item).trim() : ""))
-      .filter(Boolean);
+  const registerJobIds = useCallback(
+    (jobIds: Array<string | null | undefined>) => {
+      const normalized = jobIds
+        .map((item) => (item ? String(item).trim() : ""))
+        .filter(Boolean);
 
-    if (!normalized.length) {
-      return;
-    }
+      if (!normalized.length) {
+        return;
+      }
 
-    setActiveJobIds((current) => [...new Set([...current, ...normalized])].slice(-48));
-    lastBackendEventAtRef.current = Date.now();
-    staleBackendWarningShownRef.current = false;
-  }, []);
+      setActiveJobIds((current) =>
+        [...new Set([...current, ...normalized])].slice(-48),
+      );
+      lastBackendEventAtRef.current = Date.now();
+      staleBackendWarningShownRef.current = false;
+    },
+    [],
+  );
 
   const openFileInEditor = useCallback((path: string) => {
     setSelectedPath(path);
-    setOpenTabs((current) => (current.includes(path) ? current : [...current, path]));
+    setOpenTabs((current) =>
+      current.includes(path) ? current : [...current, path],
+    );
     const parents = getParentDirectories(path);
     if (parents.length) {
-      setExpandedDirectories((current) => [...new Set([...current, ...parents])]);
+      setExpandedDirectories((current) => [
+        ...new Set([...current, ...parents]),
+      ]);
     }
   }, []);
 
   const toggleDirectory = useCallback((path: string) => {
     setExpandedDirectories((current) =>
-      current.includes(path) ? current.filter((entry) => entry !== path) : [...current, path]
+      current.includes(path)
+        ? current.filter((entry) => entry !== path)
+        : [...current, path],
     );
   }, []);
 
@@ -1124,9 +1233,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
   const loadTree = useCallback(
     async (targetRevisionId: string) => {
-      const response = await fetch(`/api/projects/${projectId}/revisions/${targetRevisionId}/tree`, {
-        cache: "no-store"
-      });
+      const response = await fetch(
+        `/api/projects/${projectId}/revisions/${targetRevisionId}/tree`,
+        {
+          cache: "no-store",
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to fetch file tree");
       }
@@ -1136,7 +1248,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setSelectedPath((current) => current ?? firstFile);
       return payload.tree;
     },
-    [projectId]
+    [projectId],
   );
 
   const loadFile = useCallback(
@@ -1149,9 +1261,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       const search = new URLSearchParams({ path }).toString();
-      const response = await fetch(`/api/projects/${projectId}/revisions/${revisionId}/file?${search}`, {
-        cache: "no-store"
-      });
+      const response = await fetch(
+        `/api/projects/${projectId}/revisions/${revisionId}/file?${search}`,
+        {
+          cache: "no-store",
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to fetch file");
       }
@@ -1163,18 +1278,21 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         ...current,
         [payload.file.path]: {
           content: payload.file.content,
-          language: payload.file.language
-        }
+          language: payload.file.language,
+        },
       }));
     },
-    [projectId, revisionId]
+    [projectId, revisionId],
   );
 
   const loadAudit = useCallback(
     async (targetAuditId: string) => {
-      const response = await fetch(`/api/projects/${projectId}/audits/${targetAuditId}`, {
-        cache: "no-store"
-      });
+      const response = await fetch(
+        `/api/projects/${projectId}/audits/${targetAuditId}`,
+        {
+          cache: "no-store",
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to fetch audit details");
       }
@@ -1192,11 +1310,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         if (nextStatus === "queued") {
           pushWorkbenchLog("info", `Audit ${shortId(targetAuditId)} queued.`);
         } else if (nextStatus === "running") {
-          pushWorkbenchLog("info", `Audit ${shortId(targetAuditId)} running verification and analysis.`);
+          pushWorkbenchLog(
+            "info",
+            `Audit ${shortId(targetAuditId)} running verification and analysis.`,
+          );
         } else if (nextStatus === "completed") {
           pushWorkbenchLog(
             "info",
-            `Audit ${shortId(targetAuditId)} completed with ${payload.findings?.length ?? 0} finding(s).`
+            `Audit ${shortId(targetAuditId)} completed with ${payload.findings?.length ?? 0} finding(s).`,
           );
         } else if (nextStatus === "failed") {
           pushWorkbenchLog("error", `Audit ${shortId(targetAuditId)} failed.`);
@@ -1205,7 +1326,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       if (nextStatus === "completed") {
-        setActivityMessage(`Audit completed: ${payload.findings?.length ?? 0} finding(s).`);
+        setActivityMessage(
+          `Audit completed: ${payload.findings?.length ?? 0} finding(s).`,
+        );
       } else if (nextStatus === "failed") {
         setActivityMessage("Audit failed. Check audit log for details.");
       } else if (nextStatus === "running") {
@@ -1214,7 +1337,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         setActivityMessage("Audit is queued and waiting for a worker.");
       }
     },
-    [projectId, pushWorkbenchLog]
+    [projectId, pushWorkbenchLog],
   );
 
   const loadAuditHistory = useCallback(async () => {
@@ -1222,17 +1345,21 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     try {
       const response = await fetch(`/api/projects/${projectId}/audits`, {
-        cache: "no-store"
+        cache: "no-store",
       });
       if (!response.ok) {
         throw new Error("Failed to fetch audit history");
       }
 
-      const payload = (await response.json()) as { audits?: AuditHistoryItem[] };
+      const payload = (await response.json()) as {
+        audits?: AuditHistoryItem[];
+      };
       const nextHistory = payload.audits ?? [];
       setAuditHistory(nextHistory);
 
-      const completed = nextHistory.filter((item) => item.status === "completed");
+      const completed = nextHistory.filter(
+        (item) => item.status === "completed",
+      );
       const newestCompletedId = completed[0]?.id ?? "";
       const previousCompletedId = completed[1]?.id ?? "";
 
@@ -1252,7 +1379,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         return newestCompletedId || "";
       });
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : "Unable to load audit history");
+      setLastError(
+        error instanceof Error ? error.message : "Unable to load audit history",
+      );
     } finally {
       setIsAuditHistoryLoading(false);
     }
@@ -1270,10 +1399,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setActivityMessage(`Loaded audit ${shortId(item.id)} from history.`);
       pushWorkbenchLog(
         "info",
-        `Loaded audit ${shortId(item.id)} for revision ${shortId(item.revisionId)} from history.`
+        `Loaded audit ${shortId(item.id)} for revision ${shortId(item.revisionId)} from history.`,
       );
     },
-    [pushWorkbenchLog]
+    [pushWorkbenchLog],
   );
 
   const runAuditComparison = useCallback(async () => {
@@ -1293,28 +1422,35 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     try {
       const search = new URLSearchParams({
         fromAuditId: fromCompareAuditId,
-        toAuditId: toCompareAuditId
+        toAuditId: toCompareAuditId,
       }).toString();
 
-      const response = await fetch(`/api/projects/${projectId}/audits/compare?${search}`, {
-        cache: "no-store"
-      });
+      const response = await fetch(
+        `/api/projects/${projectId}/audits/compare?${search}`,
+        {
+          cache: "no-store",
+        },
+      );
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error ?? "Failed to compare audits");
       }
 
       const payload = (await response.json()) as AuditCompareResponse;
       setAuditCompareResult(payload);
       setActivityMessage(
-        `Compared audits ${shortId(payload.fromAudit.id)} -> ${shortId(payload.toAudit.id)}.`
+        `Compared audits ${shortId(payload.fromAudit.id)} -> ${shortId(payload.toAudit.id)}.`,
       );
       pushWorkbenchLog(
         "info",
-        `Compared audits ${shortId(payload.fromAudit.id)} -> ${shortId(payload.toAudit.id)}.`
+        `Compared audits ${shortId(payload.fromAudit.id)} -> ${shortId(payload.toAudit.id)}.`,
       );
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : "Failed to compare audits");
+      setLastError(
+        error instanceof Error ? error.message : "Failed to compare audits",
+      );
       setAuditCompareResult(null);
     } finally {
       setIsAuditCompareLoading(false);
@@ -1334,7 +1470,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     loadTree(revisionId).catch((error: unknown) => {
-      setLastError(error instanceof Error ? error.message : "Unable to load revision tree");
+      setLastError(
+        error instanceof Error ? error.message : "Unable to load revision tree",
+      );
     });
   }, [revisionId, loadTree]);
 
@@ -1344,7 +1482,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     loadFile(selectedPath).catch((error: unknown) => {
-      setLastError(error instanceof Error ? error.message : "Unable to load file");
+      setLastError(
+        error instanceof Error ? error.message : "Unable to load file",
+      );
     });
   }, [selectedPath, loadFile]);
 
@@ -1354,7 +1494,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     loadAudit(auditId).catch((error: unknown) => {
-      setLastError(error instanceof Error ? error.message : "Unable to load findings");
+      setLastError(
+        error instanceof Error ? error.message : "Unable to load findings",
+      );
     });
   }, [auditId, loadAudit]);
 
@@ -1368,7 +1510,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     if (fromCompareAuditId === toCompareAuditId) {
-      const alternative = completedAuditHistory.find((item) => item.id !== fromCompareAuditId)?.id ?? "";
+      const alternative =
+        completedAuditHistory.find((item) => item.id !== fromCompareAuditId)
+          ?.id ?? "";
       if (alternative && alternative !== toCompareAuditId) {
         setToCompareAuditId(alternative);
       }
@@ -1392,7 +1536,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     registerJobIds([
       `verify:${projectId}:${auditId}`,
       `audit:${projectId}:${auditId}`,
-      `finding-lifecycle:${projectId}:${auditId}`
+      `finding-lifecycle:${projectId}:${auditId}`,
     ]);
   }, [auditId, isAuditInProgress, projectId, registerJobIds]);
 
@@ -1406,7 +1550,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       const stream = new EventSource(
-        `/api/jobs/${encodeURIComponent(jobId)}/events?projectId=${projectId}`
+        `/api/jobs/${encodeURIComponent(jobId)}/events?projectId=${projectId}`,
       );
       let hadConnectionError = false;
 
@@ -1426,7 +1570,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         const messageFromPayload =
-          typeof payload.payload?.message === "string" ? payload.payload.message : null;
+          typeof payload.payload?.message === "string"
+            ? payload.payload.message
+            : null;
         const eventMessage = `[${payload.queue}] ${payload.event}${
           messageFromPayload ? `: ${messageFromPayload}` : ""
         }`;
@@ -1447,22 +1593,39 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               : {};
 
           if (payload.event === "progress") {
-            const phase = typeof verifyPayload.phase === "string" ? verifyPayload.phase : null;
+            const phase =
+              typeof verifyPayload.phase === "string"
+                ? verifyPayload.phase
+                : null;
             const totalSteps =
-              typeof verifyPayload.totalSteps === "number" && Number.isFinite(verifyPayload.totalSteps)
+              typeof verifyPayload.totalSteps === "number" &&
+              Number.isFinite(verifyPayload.totalSteps)
                 ? Math.max(0, Math.trunc(verifyPayload.totalSteps))
                 : null;
             const currentStepId =
-              typeof verifyPayload.currentStepId === "string" ? verifyPayload.currentStepId : null;
-            const toolchain = typeof verifyPayload.toolchain === "string" ? verifyPayload.toolchain : null;
+              typeof verifyPayload.currentStepId === "string"
+                ? verifyPayload.currentStepId
+                : null;
+            const toolchain =
+              typeof verifyPayload.toolchain === "string"
+                ? verifyPayload.toolchain
+                : null;
             const sandboxAdapter =
-              typeof verifyPayload.sandboxAdapter === "string" ? verifyPayload.sandboxAdapter : null;
-            const mode = typeof verifyPayload.mode === "string" ? verifyPayload.mode : null;
+              typeof verifyPayload.sandboxAdapter === "string"
+                ? verifyPayload.sandboxAdapter
+                : null;
+            const mode =
+              typeof verifyPayload.mode === "string"
+                ? verifyPayload.mode
+                : null;
             const progressSteps = parseVerifyProgressSteps(verifyPayload.steps);
 
             setVerifyProgress((current) => {
-              const nextSteps = progressSteps.length ? progressSteps : current.steps;
-              const nextTotalSteps = totalSteps ?? Math.max(nextSteps.length, current.totalSteps);
+              const nextSteps = progressSteps.length
+                ? progressSteps
+                : current.steps;
+              const nextTotalSteps =
+                totalSteps ?? Math.max(nextSteps.length, current.totalSteps);
               let nextPhase: VerifyProgressPhase = current.phase;
               if (
                 phase === "plan-ready" ||
@@ -1477,8 +1640,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               let nextCurrentStepId = currentStepId ?? current.currentStepId;
               if (nextPhase === "sandbox-running" && !nextCurrentStepId) {
                 nextCurrentStepId =
-                  nextSteps.find((step) => step.status === "running" || step.status === "pending")?.id ??
-                  null;
+                  nextSteps.find(
+                    (step) =>
+                      step.status === "running" || step.status === "pending",
+                  )?.id ?? null;
               }
               if (
                 nextPhase === "sandbox-completed" ||
@@ -1495,7 +1660,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 toolchain: toolchain ?? current.toolchain,
                 sandboxAdapter: sandboxAdapter ?? current.sandboxAdapter,
                 mode: mode ?? current.mode,
-                steps: nextSteps
+                steps: nextSteps,
               };
             });
 
@@ -1503,39 +1668,48 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               setActivityMessage(
                 totalSteps && totalSteps > 0
                   ? `Verification plan ready: ${totalSteps} sandbox step(s).`
-                  : "Verification plan ready: static checks only."
+                  : "Verification plan ready: static checks only.",
               );
             } else if (phase === "sandbox-running") {
               const runningStep =
                 progressSteps.find((step) => step.status === "running") ??
                 (currentStepId
                   ? progressSteps.find((step) => step.id === currentStepId)
-                  : progressSteps[0] ?? null);
+                  : (progressSteps[0] ?? null));
               const runningStepIndex = runningStep
-                ? progressSteps.findIndex((step) => step.id === runningStep.id) + 1
+                ? progressSteps.findIndex(
+                    (step) => step.id === runningStep.id,
+                  ) + 1
                 : 1;
               const runningTotal = totalSteps ?? progressSteps.length;
               setActivityMessage(
                 runningStep
                   ? `Verification sandbox running: ${runningStep.id} (${runningStepIndex}/${runningTotal || 1}).`
-                  : "Verification sandbox is running."
+                  : "Verification sandbox is running.",
               );
             } else if (phase === "sandbox-completed") {
               const completed =
-                typeof verifyPayload.completed === "number" && Number.isFinite(verifyPayload.completed)
+                typeof verifyPayload.completed === "number" &&
+                Number.isFinite(verifyPayload.completed)
                   ? Math.max(0, Math.trunc(verifyPayload.completed))
                   : null;
               const finishedSteps =
                 completed ?? summarizeVerifyProgress(progressSteps).completed;
               setActivityMessage(
-                `Verification sandbox completed: ${finishedSteps}/${totalSteps ?? progressSteps.length} step(s) passed.`
+                `Verification sandbox completed: ${finishedSteps}/${totalSteps ?? progressSteps.length} step(s) passed.`,
               );
             } else if (phase === "sandbox-failed") {
               const progressError =
-                typeof verifyPayload.message === "string" ? verifyPayload.message : "Sandbox execution failed.";
-              setActivityMessage(`Verification sandbox failed: ${progressError}`);
+                typeof verifyPayload.message === "string"
+                  ? verifyPayload.message
+                  : "Sandbox execution failed.";
+              setActivityMessage(
+                `Verification sandbox failed: ${progressError}`,
+              );
             } else if (phase === "sandbox-skipped") {
-              setActivityMessage("Verification completed without sandbox steps.");
+              setActivityMessage(
+                "Verification completed without sandbox steps.",
+              );
             }
 
             return;
@@ -1544,28 +1718,38 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           if (payload.event === "sandbox-step") {
             const stepPayload = parseVerifyProgressStep(
               verifyPayload.step,
-              `step-${Date.now().toString(36)}`
+              `step-${Date.now().toString(36)}`,
             );
             if (stepPayload) {
               setVerifyProgress((current) => {
                 const nextSteps = [...current.steps];
-                const existingIndex = nextSteps.findIndex((step) => step.id === stepPayload.id);
+                const existingIndex = nextSteps.findIndex(
+                  (step) => step.id === stepPayload.id,
+                );
                 if (existingIndex >= 0) {
                   nextSteps[existingIndex] = {
                     ...nextSteps[existingIndex],
-                    ...stepPayload
+                    ...stepPayload,
                   };
                 } else {
                   nextSteps.push(stepPayload);
                 }
 
                 const nextCurrentStepId =
-                  nextSteps.find((step) => step.status === "running" || step.status === "pending")?.id ??
-                  null;
-                const nextTotalSteps = Math.max(current.totalSteps, nextSteps.length);
+                  nextSteps.find(
+                    (step) =>
+                      step.status === "running" || step.status === "pending",
+                  )?.id ?? null;
+                const nextTotalSteps = Math.max(
+                  current.totalSteps,
+                  nextSteps.length,
+                );
                 const nextSummary = summarizeVerifyProgress(nextSteps);
                 const nextResolvedCount =
-                  nextSummary.completed + nextSummary.failed + nextSummary.skipped + nextSummary.timeout;
+                  nextSummary.completed +
+                  nextSummary.failed +
+                  nextSummary.skipped +
+                  nextSummary.timeout;
 
                 return {
                   ...current,
@@ -1575,34 +1759,42 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                       : "sandbox-running",
                   totalSteps: nextTotalSteps,
                   currentStepId: nextCurrentStepId,
-                  steps: nextSteps
+                  steps: nextSteps,
                 };
               });
               setActivityMessage(
-                `Verification step ${stepPayload.id}: ${stepPayload.status}.`
+                `Verification step ${stepPayload.id}: ${stepPayload.status}.`,
               );
             }
             return;
           }
 
-          if (payload.event === "started" || payload.event === "worker-started") {
+          if (
+            payload.event === "started" ||
+            payload.event === "worker-started"
+          ) {
             setVerifyProgress((current) => ({
               ...current,
-              phase: current.phase === "idle" ? "plan-ready" : current.phase
+              phase: current.phase === "idle" ? "plan-ready" : current.phase,
             }));
             setActivityMessage("Verification started.");
-          } else if (payload.event === "completed" || payload.event === "worker-completed") {
+          } else if (
+            payload.event === "completed" ||
+            payload.event === "worker-completed"
+          ) {
             setVerifyProgress((current) => ({
               ...current,
               phase: "completed",
-              currentStepId: null
+              currentStepId: null,
             }));
-            setActivityMessage("Verification completed. Waiting for audit stage...");
+            setActivityMessage(
+              "Verification completed. Waiting for audit stage...",
+            );
           } else if (isFailureEvent) {
             setVerifyProgress((current) => ({
               ...current,
               phase: "failed",
-              currentStepId: null
+              currentStepId: null,
             }));
             setActivityMessage("Verification failed.");
           }
@@ -1610,10 +1802,16 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         if (payload.queue === "audit") {
-          if (payload.event === "started" || payload.event === "worker-started") {
+          if (
+            payload.event === "started" ||
+            payload.event === "worker-started"
+          ) {
             setAuditStatus("running");
             setActivityMessage("Audit analysis is running.");
-          } else if (payload.event === "completed" || payload.event === "worker-completed") {
+          } else if (
+            payload.event === "completed" ||
+            payload.event === "worker-completed"
+          ) {
             setAuditStatus("completed");
             setActivityMessage("Audit completed.");
             if (auditId) {
@@ -1629,7 +1827,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         if (payload.queue === "finding-lifecycle") {
-          if (payload.event === "completed" || payload.event === "worker-completed") {
+          if (
+            payload.event === "completed" ||
+            payload.event === "worker-completed"
+          ) {
             setActivityMessage("Finding lifecycle mapping completed.");
             if (auditId) {
               loadAudit(auditId).catch(() => undefined);
@@ -1640,9 +1841,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         if (payload.queue === "pdf") {
-          if (payload.event === "started" || payload.event === "worker-started") {
+          if (
+            payload.event === "started" ||
+            payload.event === "worker-started"
+          ) {
             setActivityMessage("PDF export is running.");
-          } else if (payload.event === "completed" || payload.event === "worker-completed") {
+          } else if (
+            payload.event === "completed" ||
+            payload.event === "worker-completed"
+          ) {
             setActivityMessage("PDF export completed.");
             loadAuditHistory().catch(() => undefined);
           } else if (isFailureEvent) {
@@ -1659,7 +1866,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         hadConnectionError = true;
         pushWorkbenchLog(
           "warn",
-          `Job event stream error for ${jobId}. If this persists, check worker/API health.`
+          `Job event stream error for ${jobId}. If this persists, check worker/API health.`,
         );
       };
 
@@ -1673,7 +1880,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       source.close();
       currentSources.delete(jobId);
     }
-  }, [activeJobIds, auditId, loadAudit, loadAuditHistory, projectId, pushWorkbenchLog]);
+  }, [
+    activeJobIds,
+    auditId,
+    loadAudit,
+    loadAuditHistory,
+    projectId,
+    pushWorkbenchLog,
+  ]);
 
   useEffect(() => {
     if (!isAuditInProgress) {
@@ -1687,10 +1901,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       staleBackendWarningShownRef.current = true;
-      setActivityMessage("Audit is queued but no backend worker events were received for 30s.");
+      setActivityMessage(
+        "Audit is queued but no backend worker events were received for 30s.",
+      );
       pushWorkbenchLog(
         "warn",
-        "No backend job events for 30s while audit is queued/running. Worker may be offline."
+        "No backend job events for 30s while audit is queued/running. Worker may be offline.",
       );
     }, 5_000);
 
@@ -1724,7 +1940,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       return;
     }
 
-    setOpenTabs((current) => (current.includes(selectedPath) ? current : [...current, selectedPath]));
+    setOpenTabs((current) =>
+      current.includes(selectedPath) ? current : [...current, selectedPath],
+    );
   }, [selectedPath]);
 
   useEffect(() => {
@@ -1744,7 +1962,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
       return next;
     });
-    setDirtyPaths((current) => current.filter((path) => availablePaths.has(path)));
+    setDirtyPaths((current) =>
+      current.filter((path) => availablePaths.has(path)),
+    );
   }, [allFiles]);
 
   useEffect(() => {
@@ -1774,10 +1994,16 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         fallbackModelId?: string;
       };
 
-      if (parsed.primaryModelId && modelAllowlist.includes(parsed.primaryModelId)) {
+      if (
+        parsed.primaryModelId &&
+        modelAllowlist.includes(parsed.primaryModelId)
+      ) {
         setPrimaryModelId(parsed.primaryModelId);
       }
-      if (parsed.fallbackModelId && modelAllowlist.includes(parsed.fallbackModelId)) {
+      if (
+        parsed.fallbackModelId &&
+        modelAllowlist.includes(parsed.fallbackModelId)
+      ) {
         setFallbackModelId(parsed.fallbackModelId);
       }
     } catch {
@@ -1790,8 +2016,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       modelStorageKey,
       JSON.stringify({
         primaryModelId,
-        fallbackModelId
-      })
+        fallbackModelId,
+      }),
     );
   }, [fallbackModelId, modelStorageKey, primaryModelId]);
 
@@ -1872,7 +2098,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class"]
+      attributeFilter: ["class"],
     });
 
     return () => {
@@ -1896,12 +2122,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     editor.onDidChangeCursorPosition((event) => {
       setCursorPosition({
         line: event.position.lineNumber,
-        column: event.position.column
+        column: event.position.column,
       });
     });
 
     if (!lspClientRef.current) {
-      const wsUrls = buildLspWebSocketUrls(process.env.NEXT_PUBLIC_TON_LSP_WS_URL);
+      const wsUrls = buildLspWebSocketUrls(
+        process.env.NEXT_PUBLIC_TON_LSP_WS_URL,
+      );
       lspClientRef.current = startTonLspClient({
         wsUrls,
         onStatus: (status) => {
@@ -1912,7 +2140,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         },
         onError: (message) => {
           setLspErrorDetail(message);
-        }
+        },
       });
     }
   };
@@ -1926,9 +2154,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       return workingCopyId;
     }
 
-    const response = await fetch(`/api/projects/${projectId}/revisions/${revisionId}/working-copy`, {
-      method: "POST"
-    });
+    const response = await fetch(
+      `/api/projects/${projectId}/revisions/${revisionId}/working-copy`,
+      {
+        method: "POST",
+      },
+    );
     if (!response.ok) {
       throw new Error("Failed to create working copy");
     }
@@ -1941,7 +2172,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   async function enableEditing() {
     if (isAuditWriteLocked) {
       setLastError("Editing is disabled while an audit is queued or running.");
-      pushWorkbenchLog("warn", "Edit mode blocked while audit is queued/running.");
+      pushWorkbenchLog(
+        "warn",
+        "Edit mode blocked while audit is queued/running.",
+      );
       return;
     }
 
@@ -1953,8 +2187,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setActivityMessage("Editing enabled.");
       pushWorkbenchLog("info", "Editing mode enabled.");
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : "Unable to enable editing");
-      pushWorkbenchLog("error", error instanceof Error ? error.message : "Unable to enable editing");
+      setLastError(
+        error instanceof Error ? error.message : "Unable to enable editing",
+      );
+      pushWorkbenchLog(
+        "error",
+        error instanceof Error ? error.message : "Unable to enable editing",
+      );
     } finally {
       setIsBusy(false);
     }
@@ -1994,16 +2233,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           throw new Error("Enable editing before saving.");
         }
 
-        const response = await fetch(`/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json"
+        const response = await fetch(
+          `/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              path,
+              content: fileEntry.content,
+            }),
           },
-          body: JSON.stringify({
-            path,
-            content: fileEntry.content
-          })
-        });
+        );
         if (!response.ok) {
           const payload = (await response.json()) as { error?: string };
           throw new Error(payload.error ?? "Save failed");
@@ -2016,7 +2258,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         return true;
       } catch (error) {
         setLastError(error instanceof Error ? error.message : "Save failed");
-        pushWorkbenchLog("error", error instanceof Error ? error.message : "Save failed");
+        pushWorkbenchLog(
+          "error",
+          error instanceof Error ? error.message : "Save failed",
+        );
         return false;
       } finally {
         if (!options?.withoutBusy) {
@@ -2024,7 +2269,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
       }
     },
-    [ensureWorkingCopy, fileCache, isEditable, projectId, pushWorkbenchLog, workingCopyId]
+    [
+      ensureWorkingCopy,
+      fileCache,
+      isEditable,
+      projectId,
+      pushWorkbenchLog,
+      workingCopyId,
+    ],
   );
 
   const saveCurrentFile = useCallback(
@@ -2035,7 +2287,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
       return saveFilePath(selectedPath, options);
     },
-    [saveFilePath, selectedPath]
+    [saveFilePath, selectedPath],
   );
 
   useEffect(() => {
@@ -2062,7 +2314,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         return;
       }
 
-      const isToggleBottomPanelShortcut = !event.shiftKey && normalizedKey === "j";
+      const isToggleBottomPanelShortcut =
+        !event.shiftKey && normalizedKey === "j";
       if (isToggleBottomPanelShortcut) {
         event.preventDefault();
         setIsBottomPanelVisible((current) => !current);
@@ -2078,8 +2331,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         return;
       }
 
-      const isSaveShortcut =
-        !event.shiftKey && normalizedKey === "s";
+      const isSaveShortcut = !event.shiftKey && normalizedKey === "s";
       if (!isSaveShortcut) {
         return;
       }
@@ -2102,7 +2354,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [dirtyPathSet, isAuditWriteLocked, isBusy, isEditable, saveCurrentFile, selectedPath]);
+  }, [
+    dirtyPathSet,
+    isAuditWriteLocked,
+    isBusy,
+    isEditable,
+    saveCurrentFile,
+    selectedPath,
+  ]);
 
   async function runAudit() {
     if (isAuditWriteLocked) {
@@ -2136,17 +2395,20 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
       }
 
-      const response = await fetch(`/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/run-audit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
+      const response = await fetch(
+        `/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/run-audit`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            primaryModelId,
+            fallbackModelId,
+            includeDocsFallbackFetch: true,
+          }),
         },
-        body: JSON.stringify({
-          primaryModelId,
-          fallbackModelId,
-          includeDocsFallbackFetch: true
-        })
-      });
+      );
 
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
@@ -2159,7 +2421,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         verifyJobId: string | null;
       };
 
-      const verifyJobId = payload.verifyJobId ?? `verify:${projectId}:${payload.auditRun.id}`;
+      const verifyJobId =
+        payload.verifyJobId ?? `verify:${projectId}:${payload.auditRun.id}`;
       const auditJobId = `audit:${projectId}:${payload.auditRun.id}`;
       const lifecycleJobId = `finding-lifecycle:${projectId}:${payload.auditRun.id}`;
 
@@ -2174,12 +2437,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setActivityMessage(`Audit ${shortId(payload.auditRun.id)} queued.`);
       pushWorkbenchLog(
         "info",
-        `Audit ${shortId(payload.auditRun.id)} queued for revision ${shortId(payload.revision.id)}.`
+        `Audit ${shortId(payload.auditRun.id)} queued for revision ${shortId(payload.revision.id)}.`,
       );
       loadAuditHistory().catch(() => undefined);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : "Run audit failed");
-      pushWorkbenchLog("error", error instanceof Error ? error.message : "Run audit failed");
+      pushWorkbenchLog(
+        "error",
+        error instanceof Error ? error.message : "Run audit failed",
+      );
     } finally {
       setIsBusy(false);
     }
@@ -2205,15 +2471,21 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     setIsBusy(true);
     setLastError(null);
     setActivityMessage("Queueing PDF export...");
-    pushWorkbenchLog("info", `Queueing PDF export for audit ${shortId(targetAuditId)}.`);
+    pushWorkbenchLog(
+      "info",
+      `Queueing PDF export for audit ${shortId(targetAuditId)}.`,
+    );
     try {
-      const start = await fetch(`/api/projects/${projectId}/audits/${targetAuditId}/pdf`, {
-        method: "POST"
-      });
+      const start = await fetch(
+        `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
+        {
+          method: "POST",
+        },
+      );
       if (!start.ok) {
-        const startErrorPayload = (await start.json().catch(() => null)) as
-          | { error?: string }
-          | null;
+        const startErrorPayload = (await start.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(startErrorPayload?.error ?? "Failed to queue PDF");
       }
       const startPayload = (await start.json()) as { jobId?: string | number };
@@ -2225,14 +2497,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       let latestStatus = "queued";
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        const statusResponse = await fetch(`/api/projects/${projectId}/audits/${targetAuditId}/pdf`, {
-          cache: "no-store"
-        });
+        const statusResponse = await fetch(
+          `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
+          {
+            cache: "no-store",
+          },
+        );
         if (!statusResponse.ok) {
-          const statusErrorPayload = (await statusResponse.json().catch(() => null)) as
-            | { error?: string }
-            | null;
-          throw new Error(statusErrorPayload?.error ?? "Failed to check PDF export status.");
+          const statusErrorPayload = (await statusResponse
+            .json()
+            .catch(() => null)) as { error?: string } | null;
+          throw new Error(
+            statusErrorPayload?.error ?? "Failed to check PDF export status.",
+          );
         }
         const statusPayload = (await statusResponse.json()) as {
           status: string;
@@ -2254,16 +2531,24 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         throw new Error(
           latestStatus === "queued"
             ? "PDF is queued but not processing. Ensure worker is running, then try again."
-            : "PDF generation is still running. Try again in a few moments."
+            : "PDF generation is still running. Try again in a few moments.",
         );
       }
 
       window.open(url, "_blank", "noopener,noreferrer");
       setActivityMessage("PDF is ready and opened in a new tab.");
-      pushWorkbenchLog("info", `PDF export for audit ${shortId(targetAuditId)} completed.`);
+      pushWorkbenchLog(
+        "info",
+        `PDF export for audit ${shortId(targetAuditId)} completed.`,
+      );
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : "PDF export failed");
-      pushWorkbenchLog("error", error instanceof Error ? error.message : "PDF export failed");
+      setLastError(
+        error instanceof Error ? error.message : "PDF export failed",
+      );
+      pushWorkbenchLog(
+        "error",
+        error instanceof Error ? error.message : "PDF export failed",
+      );
     } finally {
       loadAuditHistory().catch(() => undefined);
       setIsBusy(false);
@@ -2275,7 +2560,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       return;
     }
 
-    const candidatePaths = [...new Set([...openTabs, selectedPath].filter((path): path is string => Boolean(path)))];
+    const candidatePaths = [
+      ...new Set(
+        [...openTabs, selectedPath].filter((path): path is string =>
+          Boolean(path),
+        ),
+      ),
+    ];
 
     setIsBusy(true);
     setLastError(null);
@@ -2284,9 +2575,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       try {
         const nextTree = await loadTree(revisionId);
         const availablePaths = new Set(treeFiles(nextTree));
-        const pathsToReload = candidatePaths.filter((path) => availablePaths.has(path));
+        const pathsToReload = candidatePaths.filter((path) =>
+          availablePaths.has(path),
+        );
 
-        await Promise.all(pathsToReload.map((path) => loadFile(path, { force: true })));
+        await Promise.all(
+          pathsToReload.map((path) => loadFile(path, { force: true })),
+        );
 
         if (auditId) {
           await loadAudit(auditId);
@@ -2320,16 +2615,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     setLastError(null);
     try {
       const activeWorkingCopyId = await ensureWorkingCopy();
-      const response = await fetch(`/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json"
+      const response = await fetch(
+        `/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            path: normalized,
+            content: "",
+          }),
         },
-        body: JSON.stringify({
-          path: normalized,
-          content: ""
-        })
-      });
+      );
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error ?? "Failed to create file");
@@ -2340,16 +2638,20 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         ...current,
         [normalized]: {
           content: "",
-          language: detectLanguageFromPath(normalized)
-        }
+          language: detectLanguageFromPath(normalized),
+        },
       }));
-      setTree((current) => buildTreeFromPaths([...new Set([...treeFiles(current), normalized])]));
+      setTree((current) =>
+        buildTreeFromPaths([...new Set([...treeFiles(current), normalized])]),
+      );
       openFileInEditor(normalized);
       setInlineNewFileName("new-module.tolk");
       setInlineNewFileParentPath(null);
       setIsInlineNewFile(false);
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : "Failed to create file");
+      setLastError(
+        error instanceof Error ? error.message : "Failed to create file",
+      );
     } finally {
       setIsBusy(false);
     }
@@ -2361,9 +2663,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       return;
     }
 
-    const selectedParents = selectedPath ? getParentDirectories(selectedPath) : [];
-    const selectedParentPath = selectedParents[selectedParents.length - 1] ?? null;
-    const targetParentPath = parentPath === undefined ? selectedParentPath : parentPath;
+    const selectedParents = selectedPath
+      ? getParentDirectories(selectedPath)
+      : [];
+    const selectedParentPath =
+      selectedParents[selectedParents.length - 1] ?? null;
+    const targetParentPath =
+      parentPath === undefined ? selectedParentPath : parentPath;
 
     setInlineNewFileParentPath(targetParentPath);
     setInlineNewFileName("new-module.tolk");
@@ -2374,8 +2680,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       return;
     }
 
-    const pathsToExpand = [...getParentDirectories(targetParentPath), targetParentPath];
-    setExpandedDirectories((current) => [...new Set([...current, ...pathsToExpand])]);
+    const pathsToExpand = [
+      ...getParentDirectories(targetParentPath),
+      targetParentPath,
+    ];
+    setExpandedDirectories((current) => [
+      ...new Set([...current, ...pathsToExpand]),
+    ]);
   }
 
   function cancelInlineNewFile() {
@@ -2404,7 +2715,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
   }
 
-  async function uploadFilesToWorkingCopy(event: ChangeEvent<HTMLInputElement>) {
+  async function uploadFilesToWorkingCopy(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
     if (isAuditWriteLocked) {
       setLastError("Cannot upload files while an audit is queued or running.");
       event.target.value = "";
@@ -2431,16 +2744,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         const content = await file.text();
-        const response = await fetch(`/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json"
+        const response = await fetch(
+          `/api/projects/${projectId}/working-copies/${activeWorkingCopyId}/file`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              path: uploadPath,
+              content,
+            }),
           },
-          body: JSON.stringify({
-            path: uploadPath,
-            content
-          })
-        });
+        );
         if (!response.ok) {
           const payload = (await response.json()) as { error?: string };
           throw new Error(payload.error ?? `Failed to upload ${uploadPath}`);
@@ -2451,14 +2767,18 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           ...current,
           [uploadPath]: {
             content,
-            language: detectLanguageFromPath(uploadPath)
-          }
+            language: detectLanguageFromPath(uploadPath),
+          },
         }));
       }
 
       if (uploadedPaths.length) {
         setIsEditable(true);
-        setTree((current) => buildTreeFromPaths([...new Set([...treeFiles(current), ...uploadedPaths])]));
+        setTree((current) =>
+          buildTreeFromPaths([
+            ...new Set([...treeFiles(current), ...uploadedPaths]),
+          ]),
+        );
         openFileInEditor(uploadedPaths[0]!);
       }
     } catch (error) {
@@ -2479,7 +2799,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       },
       onContextSelect: () => {
         startInlineNewFile(contextMenuParentPath);
-      }
+      },
     },
     {
       id: "upload-files",
@@ -2487,7 +2807,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       contextLabel: "Upload Files",
       icon: Upload,
       onDropdownSelect: openUploadPicker,
-      onContextSelect: openUploadPicker
+      onContextSelect: openUploadPicker,
     },
     {
       id: "refresh-explorer",
@@ -2495,8 +2815,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       contextLabel: "Refresh Explorer",
       icon: RefreshCcw,
       onDropdownSelect: refreshWorkbenchData,
-      onContextSelect: refreshWorkbenchData
-    }
+      onContextSelect: refreshWorkbenchData,
+    },
   ];
 
   const railToggles: RailToggleConfig[] = [
@@ -2508,7 +2828,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       title: "Toggle explorer (Ctrl/Cmd+B)",
       onClick: () => {
         setIsExplorerVisible((current) => !current);
-      }
+      },
     },
     {
       id: "findings",
@@ -2517,7 +2837,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       ariaLabel: "Toggle findings panel",
       onClick: () => {
         setIsFindingsVisible((current) => !current);
-      }
+      },
     },
     {
       id: "bottom-panel",
@@ -2527,8 +2847,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       title: "Toggle panel (Ctrl/Cmd+J)",
       onClick: () => {
         setIsBottomPanelVisible((current) => !current);
-      }
-    }
+      },
+    },
   ];
 
   const modelSelectors = [
@@ -2537,15 +2857,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       label: "Primary model",
       value: primaryModelId,
       keyPrefix: "toolbar-primary",
-      onValueChange: setPrimaryModelId
+      onValueChange: setPrimaryModelId,
     },
     {
       id: "fallback-model",
       label: "Fallback model",
       value: fallbackModelId,
       keyPrefix: "toolbar-fallback",
-      onValueChange: setFallbackModelId
-    }
+      onValueChange: setFallbackModelId,
+    },
   ] as const;
 
   return (
@@ -2560,7 +2880,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       />
 
       <div className="bg-background text-foreground flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
-        <div className={cn("grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden", workbenchGridClassName)}>
+        <div
+          className={cn(
+            "grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden",
+            workbenchGridClassName,
+          )}
+        >
           <aside className="bg-muted/30 hidden min-h-0 flex-col items-center gap-3 border-r border-border px-2 py-3 lg:flex">
             {railToggles.map((toggle) => (
               <RailToggleButton
@@ -2574,827 +2899,1028 @@ export function TonWorkbench(props: TonWorkbenchProps) {
             ))}
           </aside>
 
-        {isExplorerVisible ? (
-        <ContextMenu
-          onOpenChange={(open) => {
-            if (!open) {
-              setContextMenuTargetNode(null);
-            }
-          }}
-        >
-          <ContextMenuTrigger asChild>
-            <aside
-              className="bg-muted/30 flex min-h-0 flex-col overflow-hidden border-b border-border p-3 lg:border-r lg:border-b-0"
-              onContextMenuCapture={() => {
-                setContextMenuTargetNode(null);
+          {isExplorerVisible ? (
+            <ContextMenu
+              onOpenChange={(open) => {
+                if (!open) {
+                  setContextMenuTargetNode(null);
+                }
               }}
             >
-              <div className="mb-2 flex items-center gap-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="ghost" size="icon-sm" className="size-6">
-                      <MoreHorizontal className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    <DropdownMenuLabel>Project</DropdownMenuLabel>
-                    {explorerActions.map((action) => {
-                      const Icon = action.icon;
-                      const isWriteExplorerAction =
-                        action.id === "new-file" || action.id === "upload-files";
-                      const actionDisabled = isWriteExplorerAction && (isAuditWriteLocked || isBusy);
-                      return (
-                        <DropdownMenuItem
-                          key={`dropdown-${action.id}`}
-                          disabled={actionDisabled}
-                          onClick={action.onDropdownSelect}
-                        >
-                          <Icon className="size-3.5" />
-                          {action.dropdownLabel}
-                        </DropdownMenuItem>
-                      );
-                    })}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => {
-                        router.push("/dashboard");
-                      }}
-                    >
-                      Back to dashboard
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <div className="truncate text-xs font-semibold">{projectName}</div>
-              </div>
-
-              <Input
-                ref={explorerFilterInputRef}
-                value={explorerQuery}
-                onChange={(event) => setExplorerQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    const targetPath = filteredFilePaths[0];
-                    if (targetPath) {
-                      openFileInEditor(targetPath);
-                    }
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    setExplorerQuery("");
-                    event.currentTarget.blur();
-                  }
-                }}
-                className="mb-2 h-7 text-xs"
-                placeholder="Filter files (Ctrl/Cmd+P)"
-              />
-
-              <ScrollArea className="min-h-0 flex-1 pr-1">
-                <div className="pb-1">
-                  {filteredTree.length || isInlineNewFile ? (
-                    <TreeView
-                      nodes={filteredTree}
-                      selectedPath={selectedPath}
-                      onSelect={openFileInEditor}
-                      expandedDirectories={treeViewExpandedDirectories}
-                      onToggleDirectory={toggleDirectory}
-                      onContextNode={setContextMenuTargetNode}
-                      inlineNewFileDraft={
-                        isInlineNewFile
-                          ? {
-                              parentPath: inlineNewFileParentPath,
-                              value: inlineNewFileName,
-                              isBusy,
-                              rowRef: inlineNewFileRowRef,
-                              inputRef: newFileInputRef,
-                              onChange: setInlineNewFileName,
-                              onSubmit: submitInlineNewFile,
-                              onCancel: cancelInlineNewFile
-                            }
-                          : null
-                      }
-                    />
-                  ) : (
-                    <p className="text-muted-foreground px-1 text-xs">No files match your filter.</p>
-                  )}
-                </div>
-              </ScrollArea>
-            </aside>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuLabel>Explorer Actions</ContextMenuLabel>
-            <ContextMenuSeparator />
-            {explorerActions.map((action) => {
-              const Icon = action.icon;
-              const isWriteExplorerAction =
-                action.id === "new-file" || action.id === "upload-files";
-              const actionDisabled = isWriteExplorerAction && (isAuditWriteLocked || isBusy);
-              return (
-                <ContextMenuItem
-                  key={`context-${action.id}`}
-                  disabled={actionDisabled}
-                  onSelect={() => {
-                    action.onContextSelect();
+              <ContextMenuTrigger asChild>
+                <aside
+                  className="bg-muted/30 flex min-h-0 flex-col overflow-hidden border-b border-border p-3 lg:border-r lg:border-b-0"
+                  onContextMenuCapture={() => {
+                    setContextMenuTargetNode(null);
                   }}
                 >
-                  <Icon className="size-3.5" />
-                  {action.contextLabel}
-                </ContextMenuItem>
-              );
-            })}
-          </ContextMenuContent>
-        </ContextMenu>
-        ) : null}
-
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-          <div className="bg-muted/25 border-b border-border">
-            <div className="flex h-10 min-w-0 items-stretch">
-              <div className="min-w-0 flex-1">
-                {openTabs.length ? (
-                  <ScrollArea className="h-full w-full">
-                    <div className="flex h-10 w-max items-stretch">
-                      {openTabs.map((path) => {
-                        const isActive = selectedPath === path;
-                        return (
-                          <div
-                            key={path}
-                            className={cn(
-                              "group flex items-center border-r border-border",
-                              isActive ? "bg-card text-foreground" : "bg-muted/20 text-muted-foreground"
-                            )}
-                          >
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openFileInEditor(path)}
-                              className={cn(
-                                "h-10 min-w-[150px] max-w-[240px] justify-start rounded-none px-2.5 text-xs",
-                                isActive ? "text-foreground hover:bg-transparent" : "hover:bg-accent/40"
-                              )}
+                  <div className="mb-2 flex items-center gap-1">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="size-6"
+                        >
+                          <MoreHorizontal className="size-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-56">
+                        <DropdownMenuLabel>Project</DropdownMenuLabel>
+                        {explorerActions.map((action) => {
+                          const Icon = action.icon;
+                          const isWriteExplorerAction =
+                            action.id === "new-file" ||
+                            action.id === "upload-files";
+                          const actionDisabled =
+                            isWriteExplorerAction &&
+                            (isAuditWriteLocked || isBusy);
+                          return (
+                            <DropdownMenuItem
+                              key={`dropdown-${action.id}`}
+                              disabled={actionDisabled}
+                              onClick={action.onDropdownSelect}
                             >
-                              <FileCode2 className="size-3" />
-                              <span className="truncate">{getFileName(path)}</span>
-                              {dirtyPathSet.has(path) ? (
-                                <span className="bg-primary ml-1 inline-block size-1.5 rounded-full" />
-                              ) : null}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              className={cn(
-                                "mr-0.5 size-6 rounded-sm opacity-0 transition-opacity group-hover:opacity-100",
-                                isActive ? "opacity-100" : ""
-                              )}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                closeOpenTab(path);
-                              }}
-                              aria-label={`Close ${getFileName(path)}`}
-                            >
-                              <X className="size-3.5" />
-                            </Button>
-                          </div>
-                        );
-                      })}
+                              <Icon className="size-3.5" />
+                              {action.dropdownLabel}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => {
+                            router.push("/dashboard");
+                          }}
+                        >
+                          Back to dashboard
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <div className="truncate text-xs font-semibold">
+                      {projectName}
                     </div>
-                    <ScrollBar orientation="horizontal" />
-                  </ScrollArea>
-                ) : (
-                  <div className="text-muted-foreground flex h-full items-center px-3 text-xs">
-                    Open a file to start editing.
                   </div>
-                )}
-              </div>
 
-              <div className="bg-card/80 flex shrink-0 items-center gap-0.5 border-l border-border px-1">
-                <WorkbenchTooltip
-                  content={
-                    isAuditWriteLocked
-                      ? "Editing locked while audit is running"
-                      : isEditable
-                        ? "Read-only"
-                        : "Edit"
-                  }
-                >
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-6 rounded-sm"
-                    disabled={isAuditWriteLocked || isBusy || (!isEditable && !revisionId)}
-                    onClick={() => {
-                      void toggleEditMode();
-                    }}
-                    aria-label={isEditable ? "Read-only" : "Edit"}
-                  >
-                    {isEditable ? <Lock className="size-3.5" /> : <Pencil className="size-3.5" />}
-                  </Button>
-                </WorkbenchTooltip>
-
-                <WorkbenchTooltip content="Save file">
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-6 rounded-sm"
-                    disabled={
-                      isAuditWriteLocked ||
-                      !isEditable ||
-                      isBusy ||
-                      !selectedPath ||
-                      !dirtyPathSet.has(selectedPath)
-                    }
-                    onClick={() => {
-                      void saveCurrentFile();
-                    }}
-                    aria-label="Save file"
-                  >
-                    <Save className="size-3.5" />
-                  </Button>
-                </WorkbenchTooltip>
-
-                <WorkbenchTooltip content="Run Audit">
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-6 rounded-sm"
-                    disabled={isAuditWriteLocked || !isEditable || isBusy}
-                    onClick={runAudit}
-                    aria-label="Run Audit"
-                  >
-                    <Play className="size-3" />
-                  </Button>
-                </WorkbenchTooltip>
-
-                <WorkbenchTooltip content="Export PDF">
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-6 rounded-sm"
-                    disabled={
-                      !auditId ||
-                      isBusy ||
-                      (activeAuditHistoryItem ? activeAuditHistoryItem.status !== "completed" : auditStatus !== "completed")
-                    }
-                    onClick={() => {
-                      if (!auditId) {
-                        return;
+                  <Input
+                    ref={explorerFilterInputRef}
+                    value={explorerQuery}
+                    onChange={(event) => setExplorerQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        const targetPath = filteredFilePaths[0];
+                        if (targetPath) {
+                          openFileInEditor(targetPath);
+                        }
                       }
-                      void exportPdfForAudit(auditId);
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setExplorerQuery("");
+                        event.currentTarget.blur();
+                      }
                     }}
-                    aria-label="Export PDF"
-                  >
-                    <FileDown className="size-3.5" />
-                  </Button>
-                </WorkbenchTooltip>
-
-                <WorkbenchTooltip content="Refresh workbench">
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-6 rounded-sm"
-                    disabled={isBusy || !revisionId}
-                    onClick={refreshWorkbenchData}
-                    aria-label="Refresh workbench"
-                  >
-                    <RefreshCcw className="size-3.5" />
-                  </Button>
-                </WorkbenchTooltip>
-
-                <WorkbenchTooltip content="Toggle bottom panel">
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant={isBottomPanelVisible ? "secondary" : "ghost"}
-                    className="size-6 rounded-sm"
-                    onClick={() => {
-                      setIsBottomPanelVisible((current) => !current);
-                    }}
-                    aria-label="Toggle bottom panel"
-                  >
-                    <TerminalSquare className="size-3.5" />
-                  </Button>
-                </WorkbenchTooltip>
-
-                <WorkbenchTooltip content={`Audit ${auditStatusLabel}`}>
-                  <span
-                    className={cn(
-                      "mx-1 hidden size-1.5 rounded-full md:inline-flex",
-                      auditStatus === "failed"
-                        ? "bg-destructive"
-                        : isAuditInProgress
-                          ? "bg-primary"
-                          : "bg-muted-foreground/50"
-                    )}
-                    aria-hidden="true"
+                    className="mb-2 h-7 text-xs"
+                    placeholder="Filter files (Ctrl/Cmd+P)"
                   />
-                </WorkbenchTooltip>
 
-                {dirtyPaths.length ? (
-                  <WorkbenchTooltip content={`${dirtyPaths.length} unsaved file(s)`}>
-                    <span
-                      className="mr-0.5 hidden size-1.5 rounded-full bg-destructive md:inline-flex"
-                      aria-hidden="true"
-                    />
-                  </WorkbenchTooltip>
-                ) : null}
+                  <ScrollArea className="min-h-0 flex-1 pr-1">
+                    <div className="pb-1">
+                      {filteredTree.length || isInlineNewFile ? (
+                        <TreeView
+                          nodes={filteredTree}
+                          selectedPath={selectedPath}
+                          onSelect={openFileInEditor}
+                          expandedDirectories={treeViewExpandedDirectories}
+                          onToggleDirectory={toggleDirectory}
+                          onContextNode={setContextMenuTargetNode}
+                          inlineNewFileDraft={
+                            isInlineNewFile
+                              ? {
+                                  parentPath: inlineNewFileParentPath,
+                                  value: inlineNewFileName,
+                                  isBusy,
+                                  rowRef: inlineNewFileRowRef,
+                                  inputRef: newFileInputRef,
+                                  onChange: setInlineNewFileName,
+                                  onSubmit: submitInlineNewFile,
+                                  onCancel: cancelInlineNewFile,
+                                }
+                              : null
+                          }
+                        />
+                      ) : (
+                        <p className="text-muted-foreground px-1 text-xs">
+                          No files match your filter.
+                        </p>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </aside>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>Explorer Actions</ContextMenuLabel>
+                <ContextMenuSeparator />
+                {explorerActions.map((action) => {
+                  const Icon = action.icon;
+                  const isWriteExplorerAction =
+                    action.id === "new-file" || action.id === "upload-files";
+                  const actionDisabled =
+                    isWriteExplorerAction && (isAuditWriteLocked || isBusy);
+                  return (
+                    <ContextMenuItem
+                      key={`context-${action.id}`}
+                      disabled={actionDisabled}
+                      onSelect={() => {
+                        action.onContextSelect();
+                      }}
+                    >
+                      <Icon className="size-3.5" />
+                      {action.contextLabel}
+                    </ContextMenuItem>
+                  );
+                })}
+              </ContextMenuContent>
+            </ContextMenu>
+          ) : null}
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+            <div className="bg-muted/25 border-b border-border">
+              <div className="flex h-10 min-w-0 items-stretch">
+                <div className="min-w-0 flex-1">
+                  {openTabs.length ? (
+                    <ScrollArea className="h-full w-full">
+                      <div className="flex h-10 w-max items-stretch">
+                        {openTabs.map((path) => {
+                          const isActive = selectedPath === path;
+                          return (
+                            <div
+                              key={path}
+                              className={cn(
+                                "group flex items-center border-r border-border",
+                                isActive
+                                  ? "bg-card text-foreground"
+                                  : "bg-muted/20 text-muted-foreground",
+                              )}
+                            >
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openFileInEditor(path)}
+                                className={cn(
+                                  "h-10 min-w-[150px] max-w-[240px] justify-start rounded-none px-2.5 text-xs",
+                                  isActive
+                                    ? "text-foreground hover:bg-transparent"
+                                    : "hover:bg-accent/40",
+                                )}
+                              >
+                                <FileCode2 className="size-3" />
+                                <span className="truncate">
+                                  {getFileName(path)}
+                                </span>
+                                {dirtyPathSet.has(path) ? (
+                                  <span className="bg-primary ml-1 inline-block size-1.5 rounded-full" />
+                                ) : null}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className={cn(
+                                  "mr-0.5 size-6 rounded-sm opacity-0 transition-opacity group-hover:opacity-100",
+                                  isActive ? "opacity-100" : "",
+                                )}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  closeOpenTab(path);
+                                }}
+                                aria-label={`Close ${getFileName(path)}`}
+                              >
+                                <X className="size-3.5" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <ScrollBar orientation="horizontal" />
+                    </ScrollArea>
+                  ) : (
+                    <div className="text-muted-foreground flex h-full items-center px-3 text-xs">
+                      Open a file to start editing.
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-card/80 flex shrink-0 items-center gap-0.5 border-l border-border px-1">
+                  <WorkbenchTooltip
+                    content={
+                      isAuditWriteLocked
+                        ? "Editing locked while audit is running"
+                        : isEditable
+                          ? "Read-only"
+                          : "Edit"
+                    }
+                  >
                     <Button
                       type="button"
                       size="icon-sm"
                       variant="ghost"
                       className="size-6 rounded-sm"
-                      aria-label="Workbench options"
-                    >
-                      <MoreHorizontal className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel>Workbench</DropdownMenuLabel>
-                    <DropdownMenuItem
+                      disabled={
+                        isAuditWriteLocked ||
+                        isBusy ||
+                        (!isEditable && !revisionId)
+                      }
                       onClick={() => {
-                        router.push("/dashboard");
+                        void toggleEditMode();
                       }}
+                      aria-label={isEditable ? "Read-only" : "Edit"}
                     >
-                      Back to dashboard
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {modelSelectors.map((selector) => (
-                      <ModelSelectorSubmenu
-                        key={selector.id}
-                        label={selector.label}
-                        value={selector.value}
-                        keyPrefix={selector.keyPrefix}
-                        modelAllowlist={modelAllowlist}
-                        onValueChange={selector.onValueChange}
-                      />
-                    ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-[11px]">
-                      rev {shortId(revisionId)} · audit {shortId(auditId)} · LSP {lspStatus} · job {jobState}
-                    </DropdownMenuLabel>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {selectedPath ? (
-              <MonacoEditor
-                path={`file:///workspace/${selectedPath}`}
-                value={currentFile?.content ?? ""}
-                language={languageMap[currentFile?.language ?? "unknown"] ?? "plaintext"}
-                theme={monacoTheme}
-                options={{
-                  readOnly: !isEditable || isAuditWriteLocked,
-                  minimap: { enabled: true },
-                  fontSize: 13,
-                  lineNumbers: "on",
-                  automaticLayout: true
-                }}
-                onMount={onEditorMount}
-                onChange={(value) => {
-                  if (!selectedPath || !isEditable || isAuditWriteLocked) {
-                    return;
-                  }
-
-                  setFileCache((current) => ({
-                    ...current,
-                    [selectedPath]: {
-                      content: value ?? "",
-                      language: current[selectedPath]?.language ?? "unknown"
-                    }
-                  }));
-                  setDirtyPaths((current) =>
-                    current.includes(selectedPath) ? current : [...current, selectedPath]
-                  );
-                }}
-              />
-            ) : (
-              <div className="text-muted-foreground grid h-full place-items-center text-sm">
-                Open a file from the explorer or create one from the context menu.
-              </div>
-            )}
-          </div>
-
-          {isBottomPanelVisible ? (
-            <div className="bg-card/70 border-t border-border">
-              <div className="flex h-8 items-center gap-1 border-b border-border px-2 text-[11px]">
-                {bottomPanelTabConfig.map((tab) => {
-                  const Icon = tab.icon;
-                  return (
-                    <Button
-                      key={tab.id}
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className={cn("h-6 gap-1 px-2 text-[11px]", bottomPanelTab === tab.id ? "bg-accent/30" : "")}
-                      onClick={() => setBottomPanelTab(tab.id)}
-                    >
-                      <Icon className="size-3.5" />
-                      {tab.label}
+                      {isEditable ? (
+                        <Lock className="size-3.5" />
+                      ) : (
+                        <Pencil className="size-3.5" />
+                      )}
                     </Button>
-                  );
-                })}
-                <div className="text-muted-foreground ml-auto truncate">{activityMessage ?? "No active task."}</div>
-              </div>
+                  </WorkbenchTooltip>
 
-              <div className="h-32">
-                {bottomPanelTab === "audit-log" ? (
-                  <ScrollArea className="h-full px-2 py-2">
-                    {shouldShowVerifyProgress ? (
-                      <div className="bg-background/70 mb-2 rounded border border-border p-2">
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <span className="text-foreground font-medium">Verify</span>
-                          <span className="text-muted-foreground">{verifyProgressPhaseLabel(verifyProgress.phase)}</span>
-                          {verifyProgressTotalSteps > 0 ? (
-                            <span className="text-muted-foreground">
-                              {verifyProgressResolvedSteps}/{verifyProgressTotalSteps} step(s)
-                            </span>
-                          ) : null}
-                          {verifyProgressCurrentStep ? (
-                            <span className="text-muted-foreground ml-auto max-w-[220px] truncate">
-                              Current: {verifyProgressCurrentStep.id}
-                            </span>
-                          ) : null}
-                        </div>
+                  <WorkbenchTooltip content="Save file">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6 rounded-sm"
+                      disabled={
+                        isAuditWriteLocked ||
+                        !isEditable ||
+                        isBusy ||
+                        !selectedPath ||
+                        !dirtyPathSet.has(selectedPath)
+                      }
+                      onClick={() => {
+                        void saveCurrentFile();
+                      }}
+                      aria-label="Save file"
+                    >
+                      <Save className="size-3.5" />
+                    </Button>
+                  </WorkbenchTooltip>
 
-                        {verifyProgressTotalSteps > 0 ? (
-                          <div className="bg-muted mt-1 h-1.5 overflow-hidden rounded">
-                            <div
-                              className={cn(
-                                "h-full rounded transition-[width]",
-                                verifyProgress.phase === "failed" || verifyProgress.phase === "sandbox-failed"
-                                  ? "bg-destructive"
-                                  : "bg-primary"
-                              )}
-                              style={{ width: `${verifyProgressPercent}%` }}
-                            />
-                          </div>
-                        ) : null}
+                  <WorkbenchTooltip content="Run Audit">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6 rounded-sm"
+                      disabled={isAuditWriteLocked || !isEditable || isBusy}
+                      onClick={runAudit}
+                      aria-label="Run Audit"
+                    >
+                      <Play className="size-3" />
+                    </Button>
+                  </WorkbenchTooltip>
 
-                        {verifyProgress.steps.length ? (
-                          <div className="mt-1 space-y-0.5">
-                            {verifyProgress.steps.map((step, index) => (
-                              <div key={step.id} className="flex items-center gap-2 text-[11px]">
-                                <span className="text-muted-foreground w-5 shrink-0">{index + 1}.</span>
-                                <WorkbenchTooltip content={step.action}>
-                                  <span className="text-foreground flex-1 truncate">{step.id}</span>
-                                </WorkbenchTooltip>
-                                {step.durationMs !== null ? (
-                                  <span className="text-muted-foreground shrink-0">
-                                    {(step.durationMs / 1000).toFixed(1)}s
-                                  </span>
-                                ) : null}
-                                <span className={cn("shrink-0 uppercase", verifyStepStatusClass(step.status))}>
-                                  {step.status}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-muted-foreground mt-1 text-[11px]">
-                            No sandbox steps for this verification plan.
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
+                  <WorkbenchTooltip content="Export PDF">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6 rounded-sm"
+                      disabled={
+                        !auditId ||
+                        isBusy ||
+                        (activeAuditHistoryItem
+                          ? activeAuditHistoryItem.status !== "completed"
+                          : auditStatus !== "completed")
+                      }
+                      onClick={() => {
+                        if (!auditId) {
+                          return;
+                        }
+                        void exportPdfForAudit(auditId);
+                      }}
+                      aria-label="Export PDF"
+                    >
+                      <FileDown className="size-3.5" />
+                    </Button>
+                  </WorkbenchTooltip>
 
-                    {activityFeed.length ? (
-                      <div className="space-y-1.5">
-                        {activityFeed.map((entry) => (
-                          <div key={entry.id} className="flex items-start gap-2 text-[11px]">
-                            <span className="text-muted-foreground w-16 shrink-0">
-                              {new Date(entry.createdAt).toLocaleTimeString()}
-                            </span>
-                            <span className={cn("w-10 shrink-0 uppercase", workbenchLogLevelClass(entry.level))}>
-                              {entry.level}
-                            </span>
-                            <span className="text-foreground break-words">{entry.message}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-muted-foreground text-xs">No activity yet.</div>
-                    )}
-                  </ScrollArea>
-                ) : (
-                  <ScrollArea className="h-full px-2 py-2">
-                    {problemItems.length ? (
-                      <div className="space-y-2">
-                        {problemItems.map((item) => (
-                          <div key={item} className="text-destructive text-xs">
-                            {item}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-muted-foreground text-xs">No problems detected in this session.</div>
-                    )}
-                  </ScrollArea>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </section>
+                  <WorkbenchTooltip content="Refresh workbench">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6 rounded-sm"
+                      disabled={isBusy || !revisionId}
+                      onClick={refreshWorkbenchData}
+                      aria-label="Refresh workbench"
+                    >
+                      <RefreshCcw className="size-3.5" />
+                    </Button>
+                  </WorkbenchTooltip>
 
-        {isFindingsVisible ? (
-          <aside className="bg-muted/20 min-h-0 overflow-y-auto border-t border-border p-3 lg:border-l lg:border-t-0">
-            <div className="mb-2 flex items-center gap-1">
-              <Button
-                type="button"
-                size="sm"
-                variant={rightPanelTab === "findings" ? "secondary" : "ghost"}
-                className="h-6 px-2 text-[11px]"
-                onClick={() => setRightPanelTab("findings")}
-              >
-                Findings
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={rightPanelTab === "audit-history" ? "secondary" : "ghost"}
-                className="h-6 px-2 text-[11px]"
-                onClick={() => setRightPanelTab("audit-history")}
-              >
-                Audit History
-              </Button>
-            </div>
+                  <WorkbenchTooltip content="Toggle bottom panel">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant={isBottomPanelVisible ? "secondary" : "ghost"}
+                      className="size-6 rounded-sm"
+                      onClick={() => {
+                        setIsBottomPanelVisible((current) => !current);
+                      }}
+                      aria-label="Toggle bottom panel"
+                    >
+                      <TerminalSquare className="size-3.5" />
+                    </Button>
+                  </WorkbenchTooltip>
 
-            {rightPanelTab === "findings" ? (
-              <>
-                <div className="space-y-2">
-                  {findings.length === 0 ? (
-                    <p className="text-muted-foreground text-xs">No findings on this audit revision.</p>
-                  ) : (
-                    findings.map((item) => (
+                  <WorkbenchTooltip content={`Audit ${auditStatusLabel}`}>
+                    <span
+                      className={cn(
+                        "mx-1 hidden size-1.5 rounded-full md:inline-flex",
+                        auditStatus === "failed"
+                          ? "bg-destructive"
+                          : isAuditInProgress
+                            ? "bg-primary"
+                            : "bg-muted-foreground/50",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </WorkbenchTooltip>
+
+                  {dirtyPaths.length ? (
+                    <WorkbenchTooltip
+                      content={`${dirtyPaths.length} unsaved file(s)`}
+                    >
+                      <span
+                        className="mr-0.5 hidden size-1.5 rounded-full bg-destructive md:inline-flex"
+                        aria-hidden="true"
+                      />
+                    </WorkbenchTooltip>
+                  ) : null}
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
                       <Button
-                        key={item.id}
                         type="button"
+                        size="icon-sm"
                         variant="ghost"
-                        className="bg-card h-auto w-full justify-start rounded border border-border p-2 text-left text-xs hover:bg-accent/40"
+                        className="size-6 rounded-sm"
+                        aria-label="Workbench options"
+                      >
+                        <MoreHorizontal className="size-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuLabel>Workbench</DropdownMenuLabel>
+                      <DropdownMenuItem
                         onClick={() => {
-                          const path = item.payloadJson?.evidence?.filePath;
-                          if (path) {
-                            openFileInEditor(path);
-                          }
-                          const line = item.payloadJson?.evidence?.startLine;
-                          if (line && editorRef.current) {
-                            editorRef.current.revealLineInCenter(line);
-                            editorRef.current.setPosition({ lineNumber: line, column: 1 });
-                          }
+                          router.push("/dashboard");
                         }}
                       >
-                        <div className="w-full">
-                          <div className={`font-medium ${severityTone(item.payloadJson?.severity ?? item.severity)}`}>
-                            {item.payloadJson?.severity ?? item.severity}
-                          </div>
-                          <div className="mt-1">{item.payloadJson?.title ?? "Untitled finding"}</div>
-                          <div className="text-muted-foreground mt-1 line-clamp-2">{item.payloadJson?.summary}</div>
-                        </div>
-                      </Button>
-                    ))
-                  )}
+                        Back to dashboard
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {modelSelectors.map((selector) => (
+                        <ModelSelectorSubmenu
+                          key={selector.id}
+                          label={selector.label}
+                          value={selector.value}
+                          keyPrefix={selector.keyPrefix}
+                          modelAllowlist={modelAllowlist}
+                          onValueChange={selector.onValueChange}
+                        />
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-[11px]">
+                        rev {shortId(revisionId)} · audit {shortId(auditId)} ·
+                        LSP {lspStatus} · job {jobState}
+                      </DropdownMenuLabel>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                {lastError ? <p className="text-destructive mt-3 text-xs">{lastError}</p> : null}
-                <p className="text-muted-foreground mt-3 text-xs">Open tabs: {openTabs.length}</p>
-              </>
-            ) : (
-              <div className="space-y-3">
-                <div className="bg-card rounded border border-border p-2">
-                  <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">
-                    Compare Completed Audits
-                  </div>
-                  {completedAuditHistory.length < 2 ? (
-                    <p className="text-muted-foreground text-xs">
-                      Run at least two completed audits to compare revisions.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="text-foreground text-[11px]">
-                          From (older)
-                          <select
-                            value={fromCompareAuditId}
-                            onChange={(event) => setFromCompareAuditId(event.target.value)}
-                            className="bg-background mt-1 h-7 w-full rounded border border-border px-2 text-xs"
-                          >
-                            {completedAuditHistory.map((item) => (
-                              <option key={`from-${item.id}`} value={item.id}>
-                                {shortId(item.id)} · rev {shortId(item.revisionId)} · {new Date(item.createdAt).toLocaleString()}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="text-foreground text-[11px]">
-                          To (newer)
-                          <select
-                            value={toCompareAuditId}
-                            onChange={(event) => setToCompareAuditId(event.target.value)}
-                            className="bg-background mt-1 h-7 w-full rounded border border-border px-2 text-xs"
-                          >
-                            {completedAuditHistory.map((item) => (
-                              <option key={`to-${item.id}`} value={item.id}>
-                                {shortId(item.id)} · rev {shortId(item.revisionId)} · {new Date(item.createdAt).toLocaleString()}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
+              </div>
+            </div>
 
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {selectedPath ? (
+                <MonacoEditor
+                  path={`file:///workspace/${selectedPath}`}
+                  value={currentFile?.content ?? ""}
+                  language={
+                    languageMap[currentFile?.language ?? "unknown"] ??
+                    "plaintext"
+                  }
+                  theme={monacoTheme}
+                  options={{
+                    readOnly: !isEditable || isAuditWriteLocked,
+                    minimap: { enabled: true },
+                    fontSize: 13,
+                    lineNumbers: "on",
+                    automaticLayout: true,
+                  }}
+                  onMount={onEditorMount}
+                  onChange={(value) => {
+                    if (!selectedPath || !isEditable || isAuditWriteLocked) {
+                      return;
+                    }
+
+                    setFileCache((current) => ({
+                      ...current,
+                      [selectedPath]: {
+                        content: value ?? "",
+                        language: current[selectedPath]?.language ?? "unknown",
+                      },
+                    }));
+                    setDirtyPaths((current) =>
+                      current.includes(selectedPath)
+                        ? current
+                        : [...current, selectedPath],
+                    );
+                  }}
+                />
+              ) : (
+                <div className="text-muted-foreground grid h-full place-items-center text-sm">
+                  Open a file from the explorer or create one from the context
+                  menu.
+                </div>
+              )}
+            </div>
+
+            {isBottomPanelVisible ? (
+              <div className="bg-card/70 border-t border-border">
+                <div className="flex h-8 items-center gap-1 border-b border-border px-2 text-[11px]">
+                  {bottomPanelTabConfig.map((tab) => {
+                    const Icon = tab.icon;
+                    return (
                       <Button
+                        key={tab.id}
                         type="button"
                         size="sm"
-                        className="h-7 w-full text-xs"
-                        disabled={
-                          isAuditCompareLoading ||
-                          !fromCompareAuditId ||
-                          !toCompareAuditId ||
-                          fromCompareAuditId === toCompareAuditId
-                        }
-                        onClick={() => {
-                          void runAuditComparison();
-                        }}
+                        variant="ghost"
+                        className={cn(
+                          "h-6 gap-1 px-2 text-[11px]",
+                          bottomPanelTab === tab.id ? "bg-accent/30" : "",
+                        )}
+                        onClick={() => setBottomPanelTab(tab.id)}
                       >
-                        {isAuditCompareLoading ? "Comparing..." : "Compare"}
+                        <Icon className="size-3.5" />
+                        {tab.label}
                       </Button>
-                    </div>
+                    );
+                  })}
+                  <div className="text-muted-foreground ml-auto truncate">
+                    {activityMessage ?? "No active task."}
+                  </div>
+                </div>
+
+                <div className="h-32">
+                  {bottomPanelTab === "audit-log" ? (
+                    <ScrollArea className="h-full px-2 py-2">
+                      {shouldShowVerifyProgress ? (
+                        <div className="bg-background/70 mb-2 rounded border border-border p-2">
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="text-foreground font-medium">
+                              Verify
+                            </span>
+                            <span className="text-muted-foreground">
+                              {verifyProgressPhaseLabel(verifyProgress.phase)}
+                            </span>
+                            {verifyProgressTotalSteps > 0 ? (
+                              <span className="text-muted-foreground">
+                                {verifyProgressResolvedSteps}/
+                                {verifyProgressTotalSteps} step(s)
+                              </span>
+                            ) : null}
+                            {verifyProgressCurrentStep ? (
+                              <span className="text-muted-foreground ml-auto max-w-[220px] truncate">
+                                Current: {verifyProgressCurrentStep.id}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {verifyProgressTotalSteps > 0 ? (
+                            <div className="bg-muted mt-1 h-1.5 overflow-hidden rounded">
+                              <div
+                                className={cn(
+                                  "h-full rounded transition-[width]",
+                                  verifyProgress.phase === "failed" ||
+                                    verifyProgress.phase === "sandbox-failed"
+                                    ? "bg-destructive"
+                                    : "bg-primary",
+                                )}
+                                style={{ width: `${verifyProgressPercent}%` }}
+                              />
+                            </div>
+                          ) : null}
+
+                          {verifyProgress.steps.length ? (
+                            <div className="mt-1 space-y-0.5">
+                              {verifyProgress.steps.map((step, index) => (
+                                <div
+                                  key={step.id}
+                                  className="flex items-center gap-2 text-[11px]"
+                                >
+                                  <span className="text-muted-foreground w-5 shrink-0">
+                                    {index + 1}.
+                                  </span>
+                                  <WorkbenchTooltip content={step.action}>
+                                    <span className="text-foreground flex-1 truncate">
+                                      {step.id}
+                                    </span>
+                                  </WorkbenchTooltip>
+                                  {step.durationMs !== null ? (
+                                    <span className="text-muted-foreground shrink-0">
+                                      {(step.durationMs / 1000).toFixed(1)}s
+                                    </span>
+                                  ) : null}
+                                  <span
+                                    className={cn(
+                                      "shrink-0 uppercase",
+                                      verifyStepStatusClass(step.status),
+                                    )}
+                                  >
+                                    {step.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-muted-foreground mt-1 text-[11px]">
+                              No sandbox steps for this verification plan.
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+
+                      {activityFeed.length ? (
+                        <div className="space-y-1.5">
+                          {activityFeed.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className="flex items-start gap-2 text-[11px]"
+                            >
+                              <span className="text-muted-foreground w-16 shrink-0">
+                                {new Date(entry.createdAt).toLocaleTimeString()}
+                              </span>
+                              <span
+                                className={cn(
+                                  "w-10 shrink-0 uppercase",
+                                  workbenchLogLevelClass(entry.level),
+                                )}
+                              >
+                                {entry.level}
+                              </span>
+                              <span className="text-foreground break-words">
+                                {entry.message}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-muted-foreground text-xs">
+                          No activity yet.
+                        </div>
+                      )}
+                    </ScrollArea>
+                  ) : (
+                    <ScrollArea className="h-full px-2 py-2">
+                      {problemItems.length ? (
+                        <div className="space-y-2">
+                          {problemItems.map((item) => (
+                            <div
+                              key={item}
+                              className="text-destructive text-xs"
+                            >
+                              {item}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-muted-foreground text-xs">
+                          No problems detected in this session.
+                        </div>
+                      )}
+                    </ScrollArea>
                   )}
+                </div>
+              </div>
+            ) : null}
+          </section>
 
-                  {auditCompareResult ? (
-                    <div className="mt-3 space-y-2 text-xs">
-                      <div className="text-muted-foreground">
-                        {shortId(auditCompareResult.fromAudit.id)} ({new Date(auditCompareResult.fromAudit.createdAt).toLocaleString()})
-                        {" -> "}
-                        {shortId(auditCompareResult.toAudit.id)} ({new Date(auditCompareResult.toAudit.createdAt).toLocaleString()})
-                      </div>
-                      <div className="grid grid-cols-2 gap-1">
-                        <div className="bg-muted/60 rounded p-1.5">
-                          <div className="text-muted-foreground text-[11px]">New findings</div>
-                          <div className="text-sm font-medium">{auditCompareResult.summary.findings.newCount}</div>
-                        </div>
-                        <div className="bg-muted/60 rounded p-1.5">
-                          <div className="text-muted-foreground text-[11px]">Resolved findings</div>
-                          <div className="text-sm font-medium">{auditCompareResult.summary.findings.resolvedCount}</div>
-                        </div>
-                        <div className="bg-muted/60 rounded p-1.5">
-                          <div className="text-muted-foreground text-[11px]">Persisting</div>
-                          <div className="text-sm font-medium">{auditCompareResult.summary.findings.persistingCount}</div>
-                        </div>
-                        <div className="bg-muted/60 rounded p-1.5">
-                          <div className="text-muted-foreground text-[11px]">Severity changed</div>
-                          <div className="text-sm font-medium">{auditCompareResult.summary.findings.severityChangedCount}</div>
-                        </div>
-                      </div>
+          {isFindingsVisible ? (
+            <aside className="bg-muted/20 min-h-0 overflow-y-auto border-t border-border p-3 lg:border-l lg:border-t-0">
+              <div className="mb-2 flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={rightPanelTab === "findings" ? "secondary" : "ghost"}
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setRightPanelTab("findings")}
+                >
+                  Findings
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={
+                    rightPanelTab === "audit-history" ? "secondary" : "ghost"
+                  }
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setRightPanelTab("audit-history")}
+                >
+                  Audit History
+                </Button>
+              </div>
 
-                      <div className="space-y-1">
-                        <div className="text-foreground text-[11px] font-medium">Newly detected</div>
-                        {auditCompareResult.findings.newlyDetected.length ? (
-                          auditCompareResult.findings.newlyDetected.slice(0, 8).map((item) => (
-                            <div key={`new-${item.findingId}`} className="text-muted-foreground truncate text-[11px]">
-                              {item.severity} · {item.title} · {item.filePath}:{item.startLine}
+              {rightPanelTab === "findings" ? (
+                <>
+                  <div className="space-y-2">
+                    {findings.length === 0 ? (
+                      <p className="text-muted-foreground text-xs">
+                        No findings on this audit revision.
+                      </p>
+                    ) : (
+                      findings.map((item) => (
+                        <Button
+                          key={item.id}
+                          type="button"
+                          variant="ghost"
+                          className="bg-card h-auto w-full justify-start rounded border border-border p-2 text-left text-xs hover:bg-accent/40"
+                          onClick={() => {
+                            const path = item.payloadJson?.evidence?.filePath;
+                            if (path) {
+                              openFileInEditor(path);
+                            }
+                            const line = item.payloadJson?.evidence?.startLine;
+                            if (line && editorRef.current) {
+                              editorRef.current.revealLineInCenter(line);
+                              editorRef.current.setPosition({
+                                lineNumber: line,
+                                column: 1,
+                              });
+                            }
+                          }}
+                        >
+                          <div className="w-full">
+                            <div
+                              className={`font-medium ${severityTone(item.payloadJson?.severity ?? item.severity)}`}
+                            >
+                              {item.payloadJson?.severity ?? item.severity}
                             </div>
-                          ))
-                        ) : (
-                          <div className="text-muted-foreground text-[11px]">None</div>
-                        )}
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-foreground text-[11px] font-medium">Resolved</div>
-                        {auditCompareResult.findings.resolved.length ? (
-                          auditCompareResult.findings.resolved.slice(0, 8).map((item) => (
-                            <div key={`resolved-${item.findingId}`} className="text-muted-foreground truncate text-[11px]">
-                              {item.severity} · {item.title} · {item.filePath}:{item.startLine}
+                            <div className="mt-1">
+                              {item.payloadJson?.title ?? "Untitled finding"}
                             </div>
-                          ))
-                        ) : (
-                          <div className="text-muted-foreground text-[11px]">None</div>
-                        )}
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-foreground text-[11px] font-medium">Persisting</div>
-                        {auditCompareResult.findings.persisting.length ? (
-                          auditCompareResult.findings.persisting.slice(0, 8).map((item) => (
-                            <div key={`persisting-${item.findingId}`} className="text-muted-foreground truncate text-[11px]">
-                              {item.fromSeverity}
-                              {" -> "}
-                              {item.toSeverity}
-                              {" · "}
-                              {item.title}
-                              {" · "}
-                              {item.filePath}:{item.startLine}
+                            <div className="text-muted-foreground mt-1 line-clamp-2">
+                              {item.payloadJson?.summary}
                             </div>
-                          ))
-                        ) : (
-                          <div className="text-muted-foreground text-[11px]">None</div>
-                        )}
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-foreground text-[11px] font-medium">Files</div>
-                        <div className="text-muted-foreground text-[11px]">
-                          Added {auditCompareResult.summary.files.addedCount} · Removed {auditCompareResult.summary.files.removedCount} · Unchanged {auditCompareResult.summary.files.unchangedCount}
-                        </div>
-                        {auditCompareResult.files.added.length ? (
-                          <div className="text-muted-foreground text-[11px]">
-                            Added: {auditCompareResult.files.added.slice(0, 6).join(", ")}
                           </div>
-                        ) : null}
-                        {auditCompareResult.files.removed.length ? (
-                          <div className="text-muted-foreground text-[11px]">
-                            Removed: {auditCompareResult.files.removed.slice(0, 6).join(", ")}
-                          </div>
-                        ) : null}
-                      </div>
+                        </Button>
+                      ))
+                    )}
+                  </div>
+                  {lastError ? (
+                    <p className="text-destructive mt-3 text-xs">{lastError}</p>
+                  ) : null}
+                  <p className="text-muted-foreground mt-3 text-xs">
+                    Open tabs: {openTabs.length}
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="bg-card rounded border border-border p-2">
+                    <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">
+                      Compare Completed Audits
                     </div>
+                    {completedAuditHistory.length < 2 ? (
+                      <p className="text-muted-foreground text-xs">
+                        Run at least two completed audits to compare revisions.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-foreground text-[11px]">
+                            From (older)
+                            <select
+                              value={fromCompareAuditId}
+                              onChange={(event) =>
+                                setFromCompareAuditId(event.target.value)
+                              }
+                              className="bg-background mt-1 h-7 w-full rounded border border-border px-2 text-xs"
+                            >
+                              {completedAuditHistory.map((item) => (
+                                <option key={`from-${item.id}`} value={item.id}>
+                                  {shortId(item.id)} · rev{" "}
+                                  {shortId(item.revisionId)} ·{" "}
+                                  {new Date(item.createdAt).toLocaleString()}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="text-foreground text-[11px]">
+                            To (newer)
+                            <select
+                              value={toCompareAuditId}
+                              onChange={(event) =>
+                                setToCompareAuditId(event.target.value)
+                              }
+                              className="bg-background mt-1 h-7 w-full rounded border border-border px-2 text-xs"
+                            >
+                              {completedAuditHistory.map((item) => (
+                                <option key={`to-${item.id}`} value={item.id}>
+                                  {shortId(item.id)} · rev{" "}
+                                  {shortId(item.revisionId)} ·{" "}
+                                  {new Date(item.createdAt).toLocaleString()}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-7 w-full text-xs"
+                          disabled={
+                            isAuditCompareLoading ||
+                            !fromCompareAuditId ||
+                            !toCompareAuditId ||
+                            fromCompareAuditId === toCompareAuditId
+                          }
+                          onClick={() => {
+                            void runAuditComparison();
+                          }}
+                        >
+                          {isAuditCompareLoading ? "Comparing..." : "Compare"}
+                        </Button>
+                      </div>
+                    )}
+
+                    {auditCompareResult ? (
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className="text-muted-foreground">
+                          {shortId(auditCompareResult.fromAudit.id)} (
+                          {new Date(
+                            auditCompareResult.fromAudit.createdAt,
+                          ).toLocaleString()}
+                          ){" -> "}
+                          {shortId(auditCompareResult.toAudit.id)} (
+                          {new Date(
+                            auditCompareResult.toAudit.createdAt,
+                          ).toLocaleString()}
+                          )
+                        </div>
+                        <div className="grid grid-cols-2 gap-1">
+                          <div className="bg-muted/60 rounded p-1.5">
+                            <div className="text-muted-foreground text-[11px]">
+                              New findings
+                            </div>
+                            <div className="text-sm font-medium">
+                              {auditCompareResult.summary.findings.newCount}
+                            </div>
+                          </div>
+                          <div className="bg-muted/60 rounded p-1.5">
+                            <div className="text-muted-foreground text-[11px]">
+                              Resolved findings
+                            </div>
+                            <div className="text-sm font-medium">
+                              {
+                                auditCompareResult.summary.findings
+                                  .resolvedCount
+                              }
+                            </div>
+                          </div>
+                          <div className="bg-muted/60 rounded p-1.5">
+                            <div className="text-muted-foreground text-[11px]">
+                              Persisting
+                            </div>
+                            <div className="text-sm font-medium">
+                              {
+                                auditCompareResult.summary.findings
+                                  .persistingCount
+                              }
+                            </div>
+                          </div>
+                          <div className="bg-muted/60 rounded p-1.5">
+                            <div className="text-muted-foreground text-[11px]">
+                              Severity changed
+                            </div>
+                            <div className="text-sm font-medium">
+                              {
+                                auditCompareResult.summary.findings
+                                  .severityChangedCount
+                              }
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-foreground text-[11px] font-medium">
+                            Newly detected
+                          </div>
+                          {auditCompareResult.findings.newlyDetected.length ? (
+                            auditCompareResult.findings.newlyDetected
+                              .slice(0, 8)
+                              .map((item) => (
+                                <div
+                                  key={`new-${item.findingId}`}
+                                  className="text-muted-foreground truncate text-[11px]"
+                                >
+                                  {item.severity} · {item.title} ·{" "}
+                                  {item.filePath}:{item.startLine}
+                                </div>
+                              ))
+                          ) : (
+                            <div className="text-muted-foreground text-[11px]">
+                              None
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-foreground text-[11px] font-medium">
+                            Resolved
+                          </div>
+                          {auditCompareResult.findings.resolved.length ? (
+                            auditCompareResult.findings.resolved
+                              .slice(0, 8)
+                              .map((item) => (
+                                <div
+                                  key={`resolved-${item.findingId}`}
+                                  className="text-muted-foreground truncate text-[11px]"
+                                >
+                                  {item.severity} · {item.title} ·{" "}
+                                  {item.filePath}:{item.startLine}
+                                </div>
+                              ))
+                          ) : (
+                            <div className="text-muted-foreground text-[11px]">
+                              None
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-foreground text-[11px] font-medium">
+                            Persisting
+                          </div>
+                          {auditCompareResult.findings.persisting.length ? (
+                            auditCompareResult.findings.persisting
+                              .slice(0, 8)
+                              .map((item) => (
+                                <div
+                                  key={`persisting-${item.findingId}`}
+                                  className="text-muted-foreground truncate text-[11px]"
+                                >
+                                  {item.fromSeverity}
+                                  {" -> "}
+                                  {item.toSeverity}
+                                  {" · "}
+                                  {item.title}
+                                  {" · "}
+                                  {item.filePath}:{item.startLine}
+                                </div>
+                              ))
+                          ) : (
+                            <div className="text-muted-foreground text-[11px]">
+                              None
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-foreground text-[11px] font-medium">
+                            Files
+                          </div>
+                          <div className="text-muted-foreground text-[11px]">
+                            Added {auditCompareResult.summary.files.addedCount}{" "}
+                            · Removed{" "}
+                            {auditCompareResult.summary.files.removedCount} ·
+                            Unchanged{" "}
+                            {auditCompareResult.summary.files.unchangedCount}
+                          </div>
+                          {auditCompareResult.files.added.length ? (
+                            <div className="text-muted-foreground text-[11px]">
+                              Added:{" "}
+                              {auditCompareResult.files.added
+                                .slice(0, 6)
+                                .join(", ")}
+                            </div>
+                          ) : null}
+                          {auditCompareResult.files.removed.length ? (
+                            <div className="text-muted-foreground text-[11px]">
+                              Removed:{" "}
+                              {auditCompareResult.files.removed
+                                .slice(0, 6)
+                                .join(", ")}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-muted-foreground text-[11px] uppercase tracking-wide">
+                      Audit Runs
+                    </div>
+                    {isAuditHistoryLoading ? (
+                      <div className="text-muted-foreground text-xs">
+                        Loading audit history...
+                      </div>
+                    ) : auditHistory.length === 0 ? (
+                      <div className="text-muted-foreground text-xs">
+                        No audits yet for this project.
+                      </div>
+                    ) : (
+                      auditHistory.map((item) => (
+                        <div
+                          key={item.id}
+                          className={cn(
+                            "bg-card rounded border border-border p-2",
+                            item.id === auditId ? "border-primary/50" : "",
+                          )}
+                        >
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="text-foreground font-medium">
+                              audit {shortId(item.id)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              rev {shortId(item.revisionId)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {toAuditStatusLabel(item.status)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              PDF {toPdfStatusLabel(item.pdfStatus)}
+                            </span>
+                          </div>
+                          <div className="text-muted-foreground mt-1 text-[11px]">
+                            {new Date(item.createdAt).toLocaleString()} ·
+                            findings {item.findingCount} · {item.primaryModelId}
+                          </div>
+                          <div className="mt-2 flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[11px]"
+                              onClick={() => {
+                                viewAuditFromHistory(item);
+                              }}
+                            >
+                              View
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[11px]"
+                              disabled={item.status !== "completed" || isBusy}
+                              onClick={() => {
+                                void exportPdfForAudit(item.id);
+                              }}
+                            >
+                              Export PDF
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {lastError ? (
+                    <p className="text-destructive text-xs">{lastError}</p>
                   ) : null}
                 </div>
-
-                <div className="space-y-2">
-                  <div className="text-muted-foreground text-[11px] uppercase tracking-wide">
-                    Audit Runs
-                  </div>
-                  {isAuditHistoryLoading ? (
-                    <div className="text-muted-foreground text-xs">Loading audit history...</div>
-                  ) : auditHistory.length === 0 ? (
-                    <div className="text-muted-foreground text-xs">No audits yet for this project.</div>
-                  ) : (
-                    auditHistory.map((item) => (
-                      <div
-                        key={item.id}
-                        className={cn(
-                          "bg-card rounded border border-border p-2",
-                          item.id === auditId ? "border-primary/50" : ""
-                        )}
-                      >
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <span className="text-foreground font-medium">audit {shortId(item.id)}</span>
-                          <span className="text-muted-foreground">rev {shortId(item.revisionId)}</span>
-                          <span className="text-muted-foreground">{toAuditStatusLabel(item.status)}</span>
-                          <span className="text-muted-foreground">PDF {toPdfStatusLabel(item.pdfStatus)}</span>
-                        </div>
-                        <div className="text-muted-foreground mt-1 text-[11px]">
-                          {new Date(item.createdAt).toLocaleString()} · findings {item.findingCount} · {item.primaryModelId}
-                        </div>
-                        <div className="mt-2 flex items-center gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-2 text-[11px]"
-                            onClick={() => {
-                              viewAuditFromHistory(item);
-                            }}
-                          >
-                            View
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-2 text-[11px]"
-                            disabled={item.status !== "completed" || isBusy}
-                            onClick={() => {
-                              void exportPdfForAudit(item.id);
-                            }}
-                          >
-                            Export PDF
-                          </Button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {lastError ? <p className="text-destructive text-xs">{lastError}</p> : null}
-              </div>
-            )}
-          </aside>
-        ) : null}
+              )}
+            </aside>
+          ) : null}
         </div>
 
         <footer className="bg-card/70 flex h-7 items-center gap-3 border-t border-border px-2 text-[11px]">
-          <span className="text-foreground">{isEditable ? "Editing" : "Read-only"}</span>
-          <span className="text-muted-foreground">{selectedPath ? getFileName(selectedPath) : "No file selected"}</span>
+          <span className="text-foreground">
+            {isEditable ? "Editing" : "Read-only"}
+          </span>
+          <span className="text-muted-foreground">
+            {selectedPath ? getFileName(selectedPath) : "No file selected"}
+          </span>
           <span className="text-muted-foreground">
             Ln {cursorPosition.line}, Col {cursorPosition.column}
           </span>
-          <span className="text-muted-foreground">{currentFile?.language ?? "plaintext"}</span>
-          <span className="text-muted-foreground">audit {auditStatusLabel}</span>
+          <span className="text-muted-foreground">
+            {currentFile?.language ?? "plaintext"}
+          </span>
+          <span className="text-muted-foreground">
+            audit {auditStatusLabel}
+          </span>
           <span className="text-muted-foreground">LSP {lspStatus}</span>
           <span className="text-muted-foreground">tabs {openTabs.length}</span>
           <span className="text-muted-foreground ml-auto">
-            {dirtyPaths.length ? `${dirtyPaths.length} unsaved file(s)` : "All changes saved or staged"}
+            {dirtyPaths.length
+              ? `${dirtyPaths.length} unsaved file(s)`
+              : "All changes saved or staged"}
           </span>
         </footer>
       </div>

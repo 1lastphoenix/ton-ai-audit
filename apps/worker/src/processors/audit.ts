@@ -31,6 +31,22 @@ type RetrievedDocChunk = {
   chunkText: string;
 };
 
+type NormalizedModelError = {
+  message: string;
+  details: {
+    name: string;
+    message: string;
+    stack?: string;
+    statusCode?: number;
+    isRetryable?: boolean;
+    url?: string;
+    providerMessage?: string;
+    providerCode?: string;
+    responseBodySnippet?: string;
+  };
+  isRetryable: boolean | null;
+};
+
 const generatedAuditSchema = z.object({
   overview: z.string().min(1),
   methodology: z.string().min(1),
@@ -164,6 +180,134 @@ async function fetchFallbackDocs(): Promise<RetrievedDocChunk[]> {
   }
 
   return chunks;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function truncateForLog(value: string, max = 500) {
+  if (value.length <= max) {
+    return value;
+  }
+
+  return `${value.slice(0, max)}...`;
+}
+
+function extractProviderErrorDetails(params: { responseBody?: string; data?: unknown }) {
+  let providerMessage: string | null = null;
+  let providerCode: string | null = null;
+  let responseBodySnippet: string | null = null;
+
+  if (isRecord(params.data)) {
+    const node = isRecord(params.data.error) ? params.data.error : params.data;
+    if (typeof node.message === "string" && node.message.trim()) {
+      providerMessage = node.message.trim();
+    }
+    if (typeof node.code === "string" && node.code.trim()) {
+      providerCode = node.code.trim();
+    }
+  }
+
+  if (params.responseBody && params.responseBody.trim()) {
+    const raw = params.responseBody.trim();
+    responseBodySnippet = truncateForLog(raw, 1_200);
+
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (isRecord(parsed)) {
+        const node = isRecord(parsed.error) ? parsed.error : parsed;
+        if (!providerMessage && typeof node.message === "string" && node.message.trim()) {
+          providerMessage = node.message.trim();
+        }
+        if (!providerCode && typeof node.code === "string" && node.code.trim()) {
+          providerCode = node.code.trim();
+        }
+      }
+    } catch {
+      // Keep raw snippet when response body is not JSON.
+    }
+  }
+
+  return {
+    providerMessage,
+    providerCode,
+    responseBodySnippet
+  };
+}
+
+function normalizeModelError(error: unknown): NormalizedModelError {
+  if (!(error instanceof Error)) {
+    return {
+      message: "Unknown model invocation error",
+      details: {
+        name: "UnknownError",
+        message: "Unknown model invocation error"
+      },
+      isRetryable: null
+    };
+  }
+
+  const apiError = error as Error & {
+    statusCode?: unknown;
+    isRetryable?: unknown;
+    url?: unknown;
+    responseBody?: unknown;
+    data?: unknown;
+  };
+
+  const statusCode = typeof apiError.statusCode === "number" ? apiError.statusCode : undefined;
+  const isRetryable =
+    typeof apiError.isRetryable === "boolean" ? apiError.isRetryable : null;
+  const url = typeof apiError.url === "string" ? apiError.url : undefined;
+  const responseBody =
+    typeof apiError.responseBody === "string" ? apiError.responseBody : undefined;
+
+  const providerDetails = extractProviderErrorDetails({
+    responseBody,
+    data: apiError.data
+  });
+
+  const messageParts = [error.message];
+  if (statusCode !== undefined) {
+    messageParts.push(`status ${statusCode}`);
+  }
+  if (providerDetails.providerMessage && providerDetails.providerMessage !== error.message) {
+    messageParts.push(providerDetails.providerMessage);
+  }
+
+  const details: NormalizedModelError["details"] = {
+    name: error.name,
+    message: error.message
+  };
+
+  if (error.stack) {
+    details.stack = error.stack;
+  }
+  if (statusCode !== undefined) {
+    details.statusCode = statusCode;
+  }
+  if (isRetryable !== null) {
+    details.isRetryable = isRetryable;
+  }
+  if (url) {
+    details.url = url;
+  }
+  if (providerDetails.providerMessage) {
+    details.providerMessage = providerDetails.providerMessage;
+  }
+  if (providerDetails.providerCode) {
+    details.providerCode = providerDetails.providerCode;
+  }
+  if (providerDetails.responseBodySnippet) {
+    details.responseBodySnippet = providerDetails.responseBodySnippet;
+  }
+
+  return {
+    message: messageParts.join(" | "),
+    details,
+    isRetryable
+  };
 }
 
 function assembleAuditPrompt(params: {
@@ -307,6 +451,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
       const runModelWithRetry = async (modelId: string, stage: "primary" | "fallback") => {
         const maxAttempts = 2;
         let lastError: unknown = null;
+        let lastNormalizedError: NormalizedModelError | null = null;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
           try {
@@ -322,13 +467,28 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
             return await tryModel(modelId);
           } catch (error) {
             lastError = error;
+            const normalizedError = normalizeModelError(error);
+            lastNormalizedError = normalizedError;
+
             workerLogger.warn("audit.stage.model-attempt-failed", {
               ...context,
               stage,
               modelId,
               attempt,
-              error
+              error: normalizedError.details
             });
+
+            if (normalizedError.isRetryable === false) {
+              workerLogger.info("audit.stage.model-retry-skipped", {
+                ...context,
+                stage,
+                modelId,
+                attempt,
+                reason: "provider-marked-non-retryable",
+                statusCode: normalizedError.details.statusCode
+              });
+              break;
+            }
 
             if (attempt < maxAttempts) {
               await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
@@ -336,7 +496,11 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           }
         }
 
-        throw (lastError instanceof Error ? lastError : new Error("Model invocation failed"));
+        if (lastError instanceof Error) {
+          throw lastError;
+        }
+
+        throw new Error(lastNormalizedError?.message ?? "Model invocation failed");
       };
 
       let modelResult: Awaited<ReturnType<typeof tryModel>>;
@@ -354,10 +518,11 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           modelId: auditRun.primaryModelId
         });
       } catch (primaryError) {
+        const normalizedPrimaryError = normalizeModelError(primaryError);
         workerLogger.warn("audit.stage.model-primary-failed", {
           ...context,
           modelId: auditRun.primaryModelId,
-          error: primaryError
+          error: normalizedPrimaryError.details
         });
 
         usedModel = auditRun.fallbackModelId;
@@ -376,7 +541,8 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           key: `audits/${auditRun.id}/primary-error.json`,
           body: JSON.stringify(
             {
-              message: primaryError instanceof Error ? primaryError.message : "Unknown primary model error"
+              message: normalizedPrimaryError.message,
+              error: normalizedPrimaryError.details
             },
             null,
             2
@@ -573,6 +739,8 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
 
       return { auditRunId: auditRun.id, findingCount: report.findings.length };
     } catch (error) {
+      const normalizedError = normalizeModelError(error);
+
       await db
         .update(auditRuns)
         .set({
@@ -589,16 +757,20 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
         event: "failed",
         payload: {
           auditRunId: auditRun.id,
-          message: error instanceof Error ? error.message : "Unknown audit failure"
+          message: normalizedError.message
         }
       });
 
       workerLogger.error("audit.stage.failed", {
         ...context,
-        error
+        error: normalizedError.details
       });
 
-      throw error;
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error(normalizedError.message);
     }
   };
 }

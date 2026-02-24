@@ -41,7 +41,10 @@ const outputSchema = `z.object({
 
 const Example = () => (
   <Agent>
-    <AgentHeader model="openai/gpt-5.2-pro" name="Research Assistant" />
+    <AgentHeader
+      model="google/gemini-2.5-flash.2-pro"
+      name="Research Assistant"
+    />
     <AgentContent>
       <AgentInstructions>
         You are a helpful research assistant. Your job is to search the web for
