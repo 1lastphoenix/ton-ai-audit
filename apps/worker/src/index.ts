@@ -20,6 +20,7 @@ import { createDocsIndexProcessor } from "./processors/docs-index";
 import { createFindingLifecycleProcessor } from "./processors/finding-lifecycle";
 import { createIngestProcessor } from "./processors/ingest";
 import { toBullMqJobId } from "./job-id";
+import { workerLogger } from "./logger";
 import { createPdfProcessor } from "./processors/pdf";
 import { createVerifyProcessor } from "./processors/verify";
 import { recordJobEvent } from "./job-events";
@@ -41,34 +42,135 @@ const queues = {
   cleanup: new Queue<JobPayloadMap["cleanup"]>(queueNames.cleanup, { connection: redisConnection })
 } as const;
 
+function extractPayloadContext(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+
+  const data = payload as Record<string, unknown>;
+  const context: Record<string, unknown> = {};
+
+  if (typeof data.projectId === "string") {
+    context.projectId = data.projectId;
+  }
+  if (typeof data.revisionId === "string") {
+    context.revisionId = data.revisionId;
+  }
+  if (typeof data.auditRunId === "string") {
+    context.auditRunId = data.auditRunId;
+  }
+  if (typeof data.previousAuditRunId === "string") {
+    context.previousAuditRunId = data.previousAuditRunId;
+  }
+  if (typeof data.sourceId === "string") {
+    context.sourceId = data.sourceId;
+  }
+
+  return context;
+}
+
+function extractJobContext(job: Job<Record<string, unknown>, unknown, string> | undefined) {
+  if (!job) {
+    return {
+      queue: "unknown",
+      jobName: "unknown",
+      jobId: "unknown"
+    };
+  }
+
+  return {
+    queue: job.queueName,
+    jobName: job.name,
+    jobId: String(job.id),
+    attempt: job.attemptsMade + 1,
+    ...extractPayloadContext(job.data)
+  };
+}
+
 async function enqueueJob<Name extends keyof JobPayloadMap>(
   step: Name,
   payload: JobPayloadMap[Name],
   jobId: string
 ) {
   const safeJobId = toBullMqJobId(jobId);
+  const context = {
+    queue: step,
+    requestedJobId: jobId,
+    bullMqJobId: safeJobId,
+    ...extractPayloadContext(payload)
+  };
 
-  switch (step) {
-    case "ingest":
-      return queues.ingest.add(step, payload as JobPayloadMap["ingest"], { jobId: safeJobId });
-    case "verify":
-      return queues.verify.add(step, payload as JobPayloadMap["verify"], { jobId: safeJobId });
-    case "audit":
-      return queues.audit.add(step, payload as JobPayloadMap["audit"], { jobId: safeJobId });
-    case "finding-lifecycle":
-      return queues.findingLifecycle.add(step, payload as JobPayloadMap["finding-lifecycle"], {
-        jobId: safeJobId
-      });
-    case "pdf":
-      return queues.pdf.add(step, payload as JobPayloadMap["pdf"], { jobId: safeJobId });
-    case "docs-crawl":
-      return queues.docsCrawl.add(step, payload as JobPayloadMap["docs-crawl"], { jobId: safeJobId });
-    case "docs-index":
-      return queues.docsIndex.add(step, payload as JobPayloadMap["docs-index"], { jobId: safeJobId });
-    case "cleanup":
-      return queues.cleanup.add(step, payload as JobPayloadMap["cleanup"], { jobId: safeJobId });
-    default:
-      throw new Error(`Unsupported queue step: ${String(step)}`);
+  workerLogger.info("queue.enqueue.requested", context);
+
+  try {
+    switch (step) {
+      case "ingest": {
+        const enqueued = await queues.ingest.add(step, payload as JobPayloadMap["ingest"], {
+          jobId: safeJobId
+        });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "verify": {
+        const enqueued = await queues.verify.add(step, payload as JobPayloadMap["verify"], {
+          jobId: safeJobId
+        });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "audit": {
+        const enqueued = await queues.audit.add(step, payload as JobPayloadMap["audit"], {
+          jobId: safeJobId
+        });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "finding-lifecycle": {
+        const enqueued = await queues.findingLifecycle.add(
+          step,
+          payload as JobPayloadMap["finding-lifecycle"],
+          {
+            jobId: safeJobId
+          }
+        );
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "pdf": {
+        const enqueued = await queues.pdf.add(step, payload as JobPayloadMap["pdf"], { jobId: safeJobId });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "docs-crawl": {
+        const enqueued = await queues.docsCrawl.add(step, payload as JobPayloadMap["docs-crawl"], {
+          jobId: safeJobId
+        });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "docs-index": {
+        const enqueued = await queues.docsIndex.add(step, payload as JobPayloadMap["docs-index"], {
+          jobId: safeJobId
+        });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      case "cleanup": {
+        const enqueued = await queues.cleanup.add(step, payload as JobPayloadMap["cleanup"], {
+          jobId: safeJobId
+        });
+        workerLogger.info("queue.enqueue.accepted", { ...context, enqueuedJobId: String(enqueued.id) });
+        return enqueued;
+      }
+      default:
+        throw new Error(`Unsupported queue step: ${String(step)}`);
+    }
+  } catch (error) {
+    workerLogger.error("queue.enqueue.failed", {
+      ...context,
+      error
+    });
+    throw error;
   }
 }
 
@@ -97,7 +199,28 @@ function createWorker<Name extends JobStep>(
 ) {
   return new Worker<JobPayloadMap[Name], unknown, Name>(
     queueName,
-    async (job) => runWithTimeout(() => processor(job)),
+    async (job) => {
+      const startedAt = Date.now();
+      const context = extractJobContext(job as unknown as Job<Record<string, unknown>, unknown, string>);
+
+      workerLogger.info("worker.job.started", context);
+
+      try {
+        const result = await runWithTimeout(() => processor(job));
+        workerLogger.info("worker.job.completed", {
+          ...context,
+          durationMs: Date.now() - startedAt
+        });
+        return result;
+      } catch (error) {
+        workerLogger.error("worker.job.failed", {
+          ...context,
+          durationMs: Date.now() - startedAt,
+          error
+        });
+        throw error;
+      }
+    },
     {
       connection: redisConnection,
       concurrency
@@ -169,30 +292,72 @@ const healthServer = createServer(async (req, res) => {
 });
 
 for (const worker of workers) {
+  worker.on("active", (job) => {
+    workerLogger.info("worker.event.active", extractJobContext(job));
+  });
+
   worker.on("completed", async (job, result) => {
-    await recordJobEvent({
-      projectId: (job?.data as { projectId?: string } | undefined)?.projectId ?? null,
-      queue: worker.name,
-      jobId: String(job?.id ?? "unknown"),
-      event: "worker-completed",
-      payload: (result as Record<string, unknown>) ?? {}
-    });
+    const context = extractJobContext(job);
+    workerLogger.info("worker.event.completed", context);
+
+    try {
+      await recordJobEvent({
+        projectId: (job?.data as { projectId?: string } | undefined)?.projectId ?? null,
+        queue: worker.name,
+        jobId: String(job?.id ?? "unknown"),
+        event: "worker-completed",
+        payload: (result as Record<string, unknown>) ?? {}
+      });
+    } catch (error) {
+      workerLogger.error("worker.event.completed.record-failed", {
+        ...context,
+        error
+      });
+    }
   });
 
   worker.on("failed", async (job, error) => {
-    await recordJobEvent({
-      projectId: (job?.data as { projectId?: string } | undefined)?.projectId ?? null,
+    const context = extractJobContext(job);
+    workerLogger.error("worker.event.failed", {
+      ...context,
+      error
+    });
+
+    try {
+      await recordJobEvent({
+        projectId: (job?.data as { projectId?: string } | undefined)?.projectId ?? null,
+        queue: worker.name,
+        jobId: String(job?.id ?? "unknown"),
+        event: "worker-failed",
+        payload: {
+          message: error.message
+        }
+      });
+    } catch (recordError) {
+      workerLogger.error("worker.event.failed.record-failed", {
+        ...context,
+        error: recordError
+      });
+    }
+  });
+
+  worker.on("stalled", (jobId) => {
+    workerLogger.warn("worker.event.stalled", {
       queue: worker.name,
-      jobId: String(job?.id ?? "unknown"),
-      event: "worker-failed",
-      payload: {
-        message: error.message
-      }
+      jobId: String(jobId)
+    });
+  });
+
+  worker.on("error", (error) => {
+    workerLogger.error("worker.event.error", {
+      queue: worker.name,
+      error
     });
   });
 }
 
 async function bootstrap() {
+  workerLogger.info("bootstrap.started");
   await enqueueJob(
     "docs-crawl",
     {
@@ -200,6 +365,7 @@ async function bootstrap() {
     },
     "docs-crawl:bootstrap"
   );
+  workerLogger.info("bootstrap.docs-crawl.enqueued");
 
   await queues.cleanup.add(
     "cleanup",
@@ -213,9 +379,11 @@ async function bootstrap() {
       }
     }
   );
+  workerLogger.info("bootstrap.cleanup-schedule.enqueued");
 }
 
 async function shutdown() {
+  workerLogger.info("shutdown.started");
   await new Promise<void>((resolve) => {
     healthServer.close(() => resolve());
   });
@@ -223,10 +391,11 @@ async function shutdown() {
   await Promise.all(Object.values(queues).map((queue) => queue.close()));
   await redisConnection.quit();
   await pool.end();
+  workerLogger.info("shutdown.completed");
 }
 
 bootstrap().catch((error) => {
-  console.error("Worker bootstrap failed", error);
+  workerLogger.error("bootstrap.failed", { error });
 });
 
 process.on("SIGINT", async () => {
@@ -240,7 +409,7 @@ process.on("SIGTERM", async () => {
 });
 
 healthServer.listen(healthPort, () => {
-  console.log(`Worker health server listening on :${healthPort}`);
+  workerLogger.info("health-server.listening", { port: healthPort });
 });
 
-console.log("TON audit workers started");
+workerLogger.info("workers.started", { workerCount: workers.length });

@@ -329,6 +329,18 @@ function TreeView(props: {
   onSelect: (path: string) => void;
   expandedDirectories: Set<string>;
   onToggleDirectory: (path: string) => void;
+  parentPath?: string | null;
+  inlineNewFileDraft?: {
+    parentPath: string | null;
+    value: string;
+    isBusy: boolean;
+    inputRef: {
+      current: HTMLInputElement | null;
+    };
+    onChange: (value: string) => void;
+    onSubmit: () => void;
+    onCancel: () => void;
+  } | null;
   depth?: number;
 }) {
   const {
@@ -337,11 +349,47 @@ function TreeView(props: {
     onSelect,
     expandedDirectories = new Set<string>(),
     onToggleDirectory = () => undefined,
+    parentPath = null,
+    inlineNewFileDraft = null,
     depth = 0
   } = props;
+  const shouldRenderInlineNewFile = Boolean(
+    inlineNewFileDraft && inlineNewFileDraft.parentPath === parentPath
+  );
 
   return (
     <ul className="space-y-0.5 text-xs">
+      {shouldRenderInlineNewFile && inlineNewFileDraft ? (
+        <li key={`new-file-${parentPath ?? "root"}`}>
+          <div
+            className="flex h-6 w-full items-center gap-1 rounded px-1 text-left text-xs"
+            style={{ paddingLeft: `${depth * 12 + 22}px` }}
+          >
+            <FileCode2 className="text-muted-foreground size-3" />
+            <Input
+              ref={inlineNewFileDraft.inputRef}
+              value={inlineNewFileDraft.value}
+              onChange={(event) => inlineNewFileDraft.onChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  inlineNewFileDraft.onSubmit();
+                  return;
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  inlineNewFileDraft.onCancel();
+                }
+              }}
+              className="h-5 rounded-sm px-1 text-xs"
+              placeholder="new-file.tolk"
+              disabled={inlineNewFileDraft.isBusy}
+              aria-label="New file name"
+            />
+          </div>
+        </li>
+      ) : null}
       {nodes.map((node) => {
         if (node.type === "directory") {
           const expanded = expandedDirectories.has(node.path);
@@ -366,6 +414,8 @@ function TreeView(props: {
                   onSelect={onSelect}
                   expandedDirectories={expandedDirectories}
                   onToggleDirectory={onToggleDirectory}
+                  parentPath={node.path}
+                  inlineNewFileDraft={inlineNewFileDraft}
                   depth={depth + 1}
                 />
               ) : null}
@@ -431,7 +481,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [activityFeed, setActivityFeed] = useState<WorkbenchLogEntry[]>([]);
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
   const [isInlineNewFile, setIsInlineNewFile] = useState(false);
-  const [inlineNewFilePath, setInlineNewFilePath] = useState("contracts/new-module.tolk");
+  const [inlineNewFileName, setInlineNewFileName] = useState("new-module.tolk");
+  const [inlineNewFileParentPath, setInlineNewFileParentPath] = useState<string | null>(null);
   const [explorerQuery, setExplorerQuery] = useState("");
   const [isExplorerVisible, setIsExplorerVisible] = useState(true);
   const [isBottomPanelVisible, setIsBottomPanelVisible] = useState(true);
@@ -1403,7 +1454,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }));
       setTree((current) => buildTreeFromPaths([...new Set([...treeFiles(current), normalized])]));
       openFileInEditor(normalized);
-      setInlineNewFilePath("contracts/new-module.tolk");
+      setInlineNewFileName("new-module.tolk");
+      setInlineNewFileParentPath(null);
       setIsInlineNewFile(false);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : "Failed to create file");
@@ -1412,14 +1464,41 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
   }
 
-  function startInlineNewFile() {
-    setInlineNewFilePath((current) => current.trim() || "contracts/new-module.tolk");
+  function startInlineNewFile(parentPath?: string | null) {
+    const selectedParents = selectedPath ? getParentDirectories(selectedPath) : [];
+    const selectedParentPath = selectedParents[selectedParents.length - 1] ?? null;
+    const targetParentPath = parentPath === undefined ? selectedParentPath : parentPath;
+
+    setInlineNewFileParentPath(targetParentPath);
+    setInlineNewFileName("new-module.tolk");
+    setExplorerQuery("");
     setIsInlineNewFile(true);
+
+    if (!targetParentPath) {
+      return;
+    }
+
+    const pathsToExpand = [...getParentDirectories(targetParentPath), targetParentPath];
+    setExpandedDirectories((current) => [...new Set([...current, ...pathsToExpand])]);
   }
 
   function cancelInlineNewFile() {
     setIsInlineNewFile(false);
-    setInlineNewFilePath("contracts/new-module.tolk");
+    setInlineNewFileName("new-module.tolk");
+    setInlineNewFileParentPath(null);
+  }
+
+  function submitInlineNewFile() {
+    const trimmedName = inlineNewFileName.trim();
+    if (!trimmedName) {
+      setLastError("Provide a valid relative file path.");
+      return;
+    }
+
+    const composedPath = inlineNewFileParentPath
+      ? `${inlineNewFileParentPath}/${trimmedName}`
+      : trimmedName;
+    void createNewFile(composedPath);
   }
 
   function openUploadPicker() {
@@ -1583,49 +1662,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 <div className="truncate text-xs font-semibold">{projectName}</div>
               </div>
 
-              {isInlineNewFile ? (
-                <div className="bg-card mb-2 flex items-center gap-1 rounded-md border border-border p-1">
-                  <FilePlus2 className="text-muted-foreground size-3.5" />
-                  <Input
-                    ref={newFileInputRef}
-                    value={inlineNewFilePath}
-                    onChange={(event) => setInlineNewFilePath(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void createNewFile(inlineNewFilePath);
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        cancelInlineNewFile();
-                      }
-                    }}
-                    className="h-7 text-xs"
-                    placeholder="contracts/new-file.tolk"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-7 px-2 text-[11px]"
-                    disabled={isBusy || !inlineNewFilePath.trim()}
-                    onClick={() => {
-                      void createNewFile(inlineNewFilePath);
-                    }}
-                  >
-                    Add
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-7"
-                    onClick={cancelInlineNewFile}
-                  >
-                    <X className="size-3.5" />
-                  </Button>
-                </div>
-              ) : null}
-
               <Input
                 ref={explorerFilterInputRef}
                 value={explorerQuery}
@@ -1650,13 +1686,26 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
               <ScrollArea className="min-h-0 flex-1 pr-1">
                 <div className="pb-1">
-                  {filteredTree.length ? (
+                  {filteredTree.length || isInlineNewFile ? (
                     <TreeView
                       nodes={filteredTree}
                       selectedPath={selectedPath}
                       onSelect={openFileInEditor}
                       expandedDirectories={treeViewExpandedDirectories}
                       onToggleDirectory={toggleDirectory}
+                      inlineNewFileDraft={
+                        isInlineNewFile
+                          ? {
+                              parentPath: inlineNewFileParentPath,
+                              value: inlineNewFileName,
+                              isBusy,
+                              inputRef: newFileInputRef,
+                              onChange: setInlineNewFileName,
+                              onSubmit: submitInlineNewFile,
+                              onCancel: cancelInlineNewFile
+                            }
+                          : null
+                      }
                     />
                   ) : (
                     <p className="text-muted-foreground px-1 text-xs">No files match your filter.</p>

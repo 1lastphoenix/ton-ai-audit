@@ -19,6 +19,7 @@ import {
 import { db } from "../db";
 import { env } from "../env";
 import { recordJobEvent } from "../job-events";
+import { workerLogger } from "../logger";
 import { openrouter } from "../openrouter";
 import { loadRevisionFilesWithContent } from "../revision-files";
 import { putObject } from "../s3";
@@ -214,6 +215,16 @@ function ensureCitations(
 
 export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
   return async function audit(job: Job<JobPayloadMap["audit"]>) {
+    const context = {
+      queue: "audit",
+      jobId: String(job.id),
+      projectId: job.data.projectId,
+      revisionId: job.data.revisionId,
+      auditRunId: job.data.auditRunId
+    };
+
+    workerLogger.info("audit.stage.started", context);
+
     await recordJobEvent({
       projectId: job.data.projectId,
       queue: "audit",
@@ -230,220 +241,282 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
       throw new Error("Audit run not found");
     }
 
+    workerLogger.info("audit.stage.audit-run-found", {
+      ...context,
+      runStatus: auditRun.status,
+      includeDocsFallbackFetch: job.data.includeDocsFallbackFetch
+    });
+
     try {
       const files = await loadRevisionFilesWithContent(job.data.revisionId);
       if (!files.length) {
         throw new Error("Revision has no files to audit");
       }
 
-    const verifyRows = await db.query.verificationSteps.findMany({
-      where: eq(verificationSteps.auditRunId, auditRun.id)
-    });
-
-    const verificationSummary = verifyRows
-      .map((row) => `[${row.status}] ${row.stepType}: ${row.summary ?? "No summary"}`)
-      .join("\n");
-
-    const retrievalQuery = files
-      .slice(0, 20)
-      .map((file) => `${file.path} ${file.content.slice(0, 200)}`)
-      .join("\n");
-    let docs = await retrieveDocChunks(retrievalQuery);
-    if (docs.length === 0 && job.data.includeDocsFallbackFetch) {
-      docs = await fetchFallbackDocs();
-    }
-    const prompt = assembleAuditPrompt({
-      files,
-      verificationSummary,
-      docs
-    });
-
-    const systemPrompt = [
-      "You are an elite TON blockchain security auditor.",
-      "Return only high-confidence findings with concrete evidence.",
-      "Use severity scale critical/high/medium/low/informational.",
-      "Every finding must include exploit path and remediation."
-    ].join(" ");
-
-    const tryModel = async (modelId: string) =>
-      generateObject({
-        model: openrouter(modelId),
-        schema: generatedAuditSchema,
-        system: systemPrompt,
-        prompt
+      const verifyRows = await db.query.verificationSteps.findMany({
+        where: eq(verificationSteps.auditRunId, auditRun.id)
       });
 
-    let modelResult: Awaited<ReturnType<typeof tryModel>>;
-    let usedModel = auditRun.primaryModelId;
+      const verificationSummary = verifyRows
+        .map((row) => `[${row.status}] ${row.stepType}: ${row.summary ?? "No summary"}`)
+        .join("\n");
 
-    try {
-      modelResult = await tryModel(auditRun.primaryModelId);
-    } catch (primaryError) {
-      usedModel = auditRun.fallbackModelId;
-      modelResult = await tryModel(auditRun.fallbackModelId);
-
-      await putObject({
-        key: `audits/${auditRun.id}/primary-error.json`,
-        body: JSON.stringify(
-          {
-            message: primaryError instanceof Error ? primaryError.message : "Unknown primary model error"
-          },
-          null,
-          2
-        ),
-        contentType: "application/json"
+      workerLogger.info("audit.stage.inputs-loaded", {
+        ...context,
+        fileCount: files.length,
+        verificationStepCount: verifyRows.length
       });
-    }
 
-    const normalizedFindings = modelResult.object.findings.map((finding) =>
-      ensureCitations(finding, docs)
-    );
+      const retrievalQuery = files
+        .slice(0, 20)
+        .map((file) => `${file.path} ${file.content.slice(0, 200)}`)
+        .join("\n");
 
-    const severityTotals = normalizedFindings.reduce<Record<string, number>>((acc, finding) => {
-      acc[finding.severity] = (acc[finding.severity] ?? 0) + 1;
-      return acc;
-    }, {});
-
-    const report = auditReportSchema.parse({
-      auditId: auditRun.id,
-      projectId: auditRun.projectId,
-      revisionId: auditRun.revisionId,
-      generatedAt: new Date().toISOString(),
-      model: {
-        primary: auditRun.primaryModelId,
-        fallback: auditRun.fallbackModelId
-      },
-      summary: {
-        overview: modelResult.object.overview,
-        methodology: modelResult.object.methodology,
-        scope: modelResult.object.scope,
-        severityTotals
-      },
-      findings: normalizedFindings,
-      appendix: {
-        references: [...new Set(docs.map((item) => item.sourceUrl))],
-        verificationNotes: modelResult.object.verificationNotes
+      let docs = await retrieveDocChunks(retrievalQuery);
+      if (docs.length === 0 && job.data.includeDocsFallbackFetch) {
+        workerLogger.info("audit.stage.docs-fallback-requested", context);
+        docs = await fetchFallbackDocs();
       }
-    });
 
-    await Promise.all([
-      putObject({
-        key: `audits/${auditRun.id}/prompt.txt`,
-        body: prompt,
-        contentType: "text/plain; charset=utf-8"
-      }),
-      putObject({
-        key: `audits/${auditRun.id}/model-result.json`,
-        body: JSON.stringify(
-          {
-            model: usedModel,
-            finishReason: modelResult.finishReason,
-            usage: modelResult.usage,
-            response: modelResult.response,
-            object: modelResult.object
-          },
-          null,
-          2
-        ),
-        contentType: "application/json"
-      })
-    ]);
+      workerLogger.info("audit.stage.docs-loaded", {
+        ...context,
+        docsCount: docs.length
+      });
 
-    await db
-      .update(auditRuns)
-      .set({
-        status: "completed",
-        reportJson: report,
-        finishedAt: new Date(),
-        updatedAt: new Date()
-      })
-      .where(eq(auditRuns.id, auditRun.id));
+      const prompt = assembleAuditPrompt({
+        files,
+        verificationSummary,
+        docs
+      });
 
-    for (const finding of report.findings) {
-      const stableFingerprint =
-        finding.findingId ||
-        createFindingFingerprint({
-          title: finding.title,
-          filePath: finding.evidence.filePath,
-          startLine: finding.evidence.startLine,
-          endLine: finding.evidence.endLine,
-          severity: finding.severity
+      const systemPrompt = [
+        "You are an elite TON blockchain security auditor.",
+        "Return only high-confidence findings with concrete evidence.",
+        "Use severity scale critical/high/medium/low/informational.",
+        "Every finding must include exploit path and remediation."
+      ].join(" ");
+
+      const tryModel = async (modelId: string) =>
+        generateObject({
+          model: openrouter(modelId),
+          schema: generatedAuditSchema,
+          system: systemPrompt,
+          prompt
         });
 
-      let findingRecord = await db.query.findings.findFirst({
-        where: and(
-          eq(findings.projectId, auditRun.projectId),
-          eq(findings.stableFingerprint, stableFingerprint)
-        )
+      let modelResult: Awaited<ReturnType<typeof tryModel>>;
+      let usedModel = auditRun.primaryModelId;
+
+      workerLogger.info("audit.stage.model-primary-started", {
+        ...context,
+        modelId: auditRun.primaryModelId
       });
 
-      if (!findingRecord) {
-        const [createdFinding] = await db
-          .insert(findings)
-          .values({
-            projectId: auditRun.projectId,
-            stableFingerprint,
-            firstSeenRevisionId: auditRun.revisionId,
-            lastSeenRevisionId: auditRun.revisionId,
-            currentStatus: "opened"
-          })
-          .returning();
+      try {
+        modelResult = await tryModel(auditRun.primaryModelId);
+        workerLogger.info("audit.stage.model-primary-completed", {
+          ...context,
+          modelId: auditRun.primaryModelId
+        });
+      } catch (primaryError) {
+        workerLogger.warn("audit.stage.model-primary-failed", {
+          ...context,
+          modelId: auditRun.primaryModelId,
+          error: primaryError
+        });
 
-        if (!createdFinding) {
-          throw new Error("Failed to create finding record");
-        }
+        usedModel = auditRun.fallbackModelId;
+        workerLogger.info("audit.stage.model-fallback-started", {
+          ...context,
+          modelId: auditRun.fallbackModelId
+        });
 
-        findingRecord = createdFinding;
-      } else {
-        await db
-          .update(findings)
-          .set({
-            lastSeenRevisionId: auditRun.revisionId,
-            updatedAt: new Date()
-          })
-          .where(eq(findings.id, findingRecord.id));
+        modelResult = await tryModel(auditRun.fallbackModelId);
+        workerLogger.info("audit.stage.model-fallback-completed", {
+          ...context,
+          modelId: auditRun.fallbackModelId
+        });
+
+        await putObject({
+          key: `audits/${auditRun.id}/primary-error.json`,
+          body: JSON.stringify(
+            {
+              message: primaryError instanceof Error ? primaryError.message : "Unknown primary model error"
+            },
+            null,
+            2
+          ),
+          contentType: "application/json"
+        });
       }
+
+      const normalizedFindings = modelResult.object.findings.map((finding) =>
+        ensureCitations(finding, docs)
+      );
+
+      const severityTotals = normalizedFindings.reduce<Record<string, number>>((acc, finding) => {
+        acc[finding.severity] = (acc[finding.severity] ?? 0) + 1;
+        return acc;
+      }, {});
+
+      const report = auditReportSchema.parse({
+        auditId: auditRun.id,
+        projectId: auditRun.projectId,
+        revisionId: auditRun.revisionId,
+        generatedAt: new Date().toISOString(),
+        model: {
+          primary: auditRun.primaryModelId,
+          fallback: auditRun.fallbackModelId
+        },
+        summary: {
+          overview: modelResult.object.overview,
+          methodology: modelResult.object.methodology,
+          scope: modelResult.object.scope,
+          severityTotals
+        },
+        findings: normalizedFindings,
+        appendix: {
+          references: [...new Set(docs.map((item) => item.sourceUrl))],
+          verificationNotes: modelResult.object.verificationNotes
+        }
+      });
+
+      workerLogger.info("audit.stage.report-built", {
+        ...context,
+        findingCount: report.findings.length,
+        model: usedModel
+      });
+
+      await Promise.all([
+        putObject({
+          key: `audits/${auditRun.id}/prompt.txt`,
+          body: prompt,
+          contentType: "text/plain; charset=utf-8"
+        }),
+        putObject({
+          key: `audits/${auditRun.id}/model-result.json`,
+          body: JSON.stringify(
+            {
+              model: usedModel,
+              finishReason: modelResult.finishReason,
+              usage: modelResult.usage,
+              response: modelResult.response,
+              object: modelResult.object
+            },
+            null,
+            2
+          ),
+          contentType: "application/json"
+        })
+      ]);
 
       await db
-        .insert(findingInstances)
-        .values({
-          findingId: findingRecord.id,
-          auditRunId: auditRun.id,
-          revisionId: auditRun.revisionId,
-          severity: finding.severity,
-          payloadJson: finding
+        .update(auditRuns)
+        .set({
+          status: "completed",
+          reportJson: report,
+          finishedAt: new Date(),
+          updatedAt: new Date()
         })
-        .onConflictDoUpdate({
-          target: [findingInstances.findingId, findingInstances.auditRunId],
-          set: {
+        .where(eq(auditRuns.id, auditRun.id));
+
+      workerLogger.info("audit.stage.audit-run-marked-completed", context);
+
+      for (const finding of report.findings) {
+        const stableFingerprint =
+          finding.findingId ||
+          createFindingFingerprint({
+            title: finding.title,
+            filePath: finding.evidence.filePath,
+            startLine: finding.evidence.startLine,
+            endLine: finding.evidence.endLine,
+            severity: finding.severity
+          });
+
+        let findingRecord = await db.query.findings.findFirst({
+          where: and(
+            eq(findings.projectId, auditRun.projectId),
+            eq(findings.stableFingerprint, stableFingerprint)
+          )
+        });
+
+        if (!findingRecord) {
+          const [createdFinding] = await db
+            .insert(findings)
+            .values({
+              projectId: auditRun.projectId,
+              stableFingerprint,
+              firstSeenRevisionId: auditRun.revisionId,
+              lastSeenRevisionId: auditRun.revisionId,
+              currentStatus: "opened"
+            })
+            .returning();
+
+          if (!createdFinding) {
+            throw new Error("Failed to create finding record");
+          }
+
+          findingRecord = createdFinding;
+        } else {
+          await db
+            .update(findings)
+            .set({
+              lastSeenRevisionId: auditRun.revisionId,
+              updatedAt: new Date()
+            })
+            .where(eq(findings.id, findingRecord.id));
+        }
+
+        await db
+          .insert(findingInstances)
+          .values({
+            findingId: findingRecord.id,
+            auditRunId: auditRun.id,
+            revisionId: auditRun.revisionId,
             severity: finding.severity,
             payloadJson: finding
-          }
-        });
-    }
+          })
+          .onConflictDoUpdate({
+            target: [findingInstances.findingId, findingInstances.auditRunId],
+            set: {
+              severity: finding.severity,
+              payloadJson: finding
+            }
+          });
+      }
 
-    const [previousAudit] = await db
-      .select()
-      .from(auditRuns)
-      .where(
-        and(
-          eq(auditRuns.projectId, auditRun.projectId),
-          eq(auditRuns.status, "completed"),
-          sql`${auditRuns.createdAt} < ${auditRun.createdAt}`
+      workerLogger.info("audit.stage.findings-persisted", {
+        ...context,
+        findingCount: report.findings.length
+      });
+
+      const [previousAudit] = await db
+        .select()
+        .from(auditRuns)
+        .where(
+          and(
+            eq(auditRuns.projectId, auditRun.projectId),
+            eq(auditRuns.status, "completed"),
+            sql`${auditRuns.createdAt} < ${auditRun.createdAt}`
+          )
         )
-      )
-      .orderBy(desc(auditRuns.createdAt))
-      .limit(1);
+        .orderBy(desc(auditRuns.createdAt))
+        .limit(1);
 
-    await deps.enqueueJob(
-      "finding-lifecycle",
-      {
-        projectId: auditRun.projectId,
-        auditRunId: auditRun.id,
+      await deps.enqueueJob(
+        "finding-lifecycle",
+        {
+          projectId: auditRun.projectId,
+          auditRunId: auditRun.id,
+          previousAuditRunId: previousAudit?.id ?? null
+        },
+        `finding-lifecycle:${auditRun.projectId}:${auditRun.id}`
+      );
+
+      workerLogger.info("audit.stage.finding-lifecycle-enqueued", {
+        ...context,
         previousAuditRunId: previousAudit?.id ?? null
-      },
-      `finding-lifecycle:${auditRun.projectId}:${auditRun.id}`
-    );
+      });
 
       await recordJobEvent({
         projectId: job.data.projectId,
@@ -455,6 +528,12 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           findingCount: report.findings.length,
           model: usedModel
         }
+      });
+
+      workerLogger.info("audit.stage.completed", {
+        ...context,
+        findingCount: report.findings.length,
+        model: usedModel
       });
 
       return { auditRunId: auditRun.id, findingCount: report.findings.length };
@@ -477,6 +556,11 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           auditRunId: auditRun.id,
           message: error instanceof Error ? error.message : "Unknown audit failure"
         }
+      });
+
+      workerLogger.error("audit.stage.failed", {
+        ...context,
+        error
       });
 
       throw error;

@@ -9,6 +9,7 @@ import {
 
 import { db } from "../db";
 import { recordJobEvent } from "../job-events";
+import { workerLogger } from "../logger";
 import { loadRevisionFilesWithContent } from "../revision-files";
 import { putObject } from "../s3";
 import { planSandboxVerification } from "../sandbox/adapters";
@@ -81,6 +82,16 @@ function detectToolchain(files: Awaited<ReturnType<typeof loadRevisionFilesWithC
 
 export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
   return async function verify(job: Job<JobPayloadMap["verify"]>) {
+    const context = {
+      queue: "verify",
+      jobId: String(job.id),
+      projectId: job.data.projectId,
+      revisionId: job.data.revisionId,
+      auditRunId: job.data.auditRunId
+    };
+
+    workerLogger.info("verify.stage.started", context);
+
     await recordJobEvent({
       projectId: job.data.projectId,
       queue: "verify",
@@ -97,6 +108,11 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       throw new Error("Audit run not found");
     }
 
+    workerLogger.info("verify.stage.audit-run-found", {
+      ...context,
+      runStatus: auditRun.status
+    });
+
     await db
       .update(auditRuns)
       .set({
@@ -105,6 +121,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         updatedAt: new Date()
       })
       .where(eq(auditRuns.id, auditRun.id));
+
+    workerLogger.info("verify.stage.audit-run-marked-running", context);
 
     try {
       const files = await loadRevisionFilesWithContent(job.data.revisionId);
@@ -117,10 +135,24 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         }))
       );
 
+      workerLogger.info("verify.stage.inputs-loaded", {
+        ...context,
+        fileCount: files.length,
+        toolchain,
+        sandboxAdapter: plan.adapter,
+        sandboxStepCount: plan.steps.length,
+        diagnosticsCount: diagnostics.length
+      });
+
       let sandboxExecutionSummary = "Sandbox execution skipped";
       let sandboxResults: Awaited<ReturnType<typeof executeSandboxPlan>>["results"] = [];
 
       if (plan.steps.length > 0) {
+        workerLogger.info("verify.stage.sandbox-starting", {
+          ...context,
+          sandboxStepCount: plan.steps.length
+        });
+
         try {
           const execution = await executeSandboxPlan({
             files: files.map((file) => ({ path: file.path, content: file.content })),
@@ -139,10 +171,24 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             `Skipped: ${summary.skipped}`,
             `Timeout: ${summary.timeout}`
           ].join(" | ");
+
+          workerLogger.info("verify.stage.sandbox-completed", {
+            ...context,
+            mode: execution.mode,
+            sandboxCompleted: summary.completed,
+            sandboxFailed: summary.failed,
+            sandboxSkipped: summary.skipped,
+            sandboxTimeout: summary.timeout
+          });
         } catch (sandboxError) {
           sandboxExecutionSummary = `Sandbox execution unavailable: ${
             sandboxError instanceof Error ? sandboxError.message : "Unknown error"
           }`;
+
+          workerLogger.warn("verify.stage.sandbox-failed", {
+            ...context,
+            error: sandboxError
+          });
         }
       }
 
@@ -186,6 +232,12 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         })
       ]);
 
+      workerLogger.info("verify.stage.artifacts-persisted", {
+        ...context,
+        diagnosticsKey,
+        sandboxKey
+      });
+
       const startedAt = new Date();
 
       await db.insert(verificationSteps).values({
@@ -201,6 +253,12 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         stderrKey,
         summary: `${diagnostics.length} deterministic diagnostics | ${sandboxExecutionSummary}`,
         durationMs: Math.max(Date.now() - startedAt.getTime(), 1)
+      });
+
+      workerLogger.info("verify.stage.summary-step-recorded", {
+        ...context,
+        diagnosticsCount: diagnostics.length,
+        sandboxResultCount: sandboxResults.length
       });
 
       for (const sandboxResult of sandboxResults) {
@@ -237,6 +295,11 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         });
       }
 
+      workerLogger.info("verify.stage.sandbox-steps-recorded", {
+        ...context,
+        sandboxResultCount: sandboxResults.length
+      });
+
       await deps.enqueueJob(
         "audit",
         {
@@ -248,6 +311,11 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         `audit:${job.data.projectId}:${auditRun.id}`
       );
 
+      workerLogger.info("verify.stage.audit-enqueued", {
+        ...context,
+        auditJobId: `audit:${job.data.projectId}:${auditRun.id}`
+      });
+
       await recordJobEvent({
         projectId: job.data.projectId,
         queue: "verify",
@@ -257,6 +325,11 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           auditRunId: auditRun.id,
           diagnostics: diagnostics.length
         }
+      });
+
+      workerLogger.info("verify.stage.completed", {
+        ...context,
+        diagnosticsCount: diagnostics.length
       });
 
       return { auditRunId: auditRun.id, diagnosticsCount: diagnostics.length };
@@ -279,6 +352,11 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           auditRunId: auditRun.id,
           message: error instanceof Error ? error.message : "Unknown verify failure"
         }
+      });
+
+      workerLogger.error("verify.stage.failed", {
+        ...context,
+        error
       });
 
       throw error;
