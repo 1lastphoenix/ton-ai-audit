@@ -44,6 +44,7 @@ One-liner full local verification:
 - Use `docker-compose.prod.yml`: `docker compose -f docker-compose.prod.yml --env-file .env up -d --build`
 - Set `DB_PASSWORD` once as the canonical Postgres credential source.
 - `DATABASE_URL` is auto-derived from `DB_PASSWORD`, `POSTGRES_USER`, and `POSTGRES_DB` unless you explicitly override it.
+- A one-shot `migrate` service runs Drizzle migrations and `web`/`worker` wait for it to complete successfully.
 - The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.
 - Internal trust-zone services run on `core` internal network.
 - Public-facing services join external proxy network `${PROXY_NETWORK:-dokploy-network}`.
@@ -52,6 +53,7 @@ One-liner full local verification:
   - `lsp-service` -> `3002` (if Monaco browser LSP is enabled)
 - Sandbox runner defaults to docker-isolated execution and requires docker socket access (`DOCKER_SOCK_PATH`).
 - If you override sandbox image tags, keep `SANDBOX_RUNNER_IMAGE` and `SANDBOX_DOCKER_IMAGE` aligned.
+- To run migrations manually: `docker compose -f docker-compose.prod.yml --env-file .env run --rm migrate`
 
 ## Core capabilities in this scaffold
 

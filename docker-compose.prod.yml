@@ -127,6 +127,28 @@ services:
       - "3002"
     networks: [edge, core]
 
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-ton_audit}}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      [
+        "pnpm",
+        "--filter",
+        "@ton-audit/web",
+        "exec",
+        "drizzle-kit",
+        "migrate",
+      ]
+    networks: [core]
+
   web:
     build:
       context: .
@@ -159,6 +181,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -225,6 +249,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
