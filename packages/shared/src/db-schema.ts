@@ -14,7 +14,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 import {
   auditRunStatusSchema,
@@ -103,36 +103,36 @@ export const users = pgTable(
   "users",
   {
     id: text("id").primaryKey(),
-    name: text("name"),
-    email: text("email").notNull(),
-    emailVerified: boolean("email_verified").notNull().default(false),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("emailVerified").default(false).notNull(),
     image: text("image"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => ({
-    emailUnique: unique("users_email_unique").on(table.email),
-    emailIdx: index("users_email_idx").on(table.email)
-  })
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull()
+  }
 );
 
 export const sessions = pgTable(
   "sessions",
   {
     id: text("id").primaryKey(),
-    token: text("token").notNull(),
-    userId: text("user_id")
+    expiresAt: timestamp("expiresAt").notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt")
+      .$onUpdate(() => new Date())
+      .notNull(),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    userId: text("userId")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    ipAddress: text("ip_address"),
-    userAgent: text("user_agent"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+      .references(() => users.id, { onDelete: "cascade" })
   },
   (table) => ({
-    tokenUnique: unique("sessions_token_unique").on(table.token),
-    userIdIdx: index("sessions_user_id_idx").on(table.userId)
+    userIdIdx: index("sessions_userId_idx").on(table.userId)
   })
 );
 
@@ -140,44 +140,64 @@ export const accounts = pgTable(
   "accounts",
   {
     id: text("id").primaryKey(),
-    accountId: text("account_id").notNull(),
-    providerId: text("provider_id").notNull(),
-    userId: text("user_id")
+    accountId: text("accountId").notNull(),
+    providerId: text("providerId").notNull(),
+    userId: text("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    accessToken: text("access_token"),
-    refreshToken: text("refresh_token"),
-    idToken: text("id_token"),
-    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
-    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    accessToken: text("accessToken"),
+    refreshToken: text("refreshToken"),
+    idToken: text("idToken"),
+    accessTokenExpiresAt: timestamp("accessTokenExpiresAt"),
+    refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt"),
     scope: text("scope"),
     password: text("password"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt")
+      .$onUpdate(() => new Date())
+      .notNull()
   },
   (table) => ({
-    providerAccountUnique: unique("accounts_provider_account_unique").on(
-      table.providerId,
-      table.accountId
-    ),
-    userIdIdx: index("accounts_user_id_idx").on(table.userId)
+    userIdIdx: index("accounts_userId_idx").on(table.userId)
   })
 );
 
-export const verificationTokens = pgTable(
-  "verification_tokens",
+export const verifications = pgTable(
+  "verifications",
   {
     id: text("id").primaryKey(),
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+    expiresAt: timestamp("expiresAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull()
   },
   (table) => ({
-    identifierIdx: index("verification_tokens_identifier_idx").on(table.identifier)
+    identifierIdx: index("verifications_identifier_idx").on(table.identifier)
   })
 );
+
+export const usersRelations = relations(users, ({ many }) => ({
+  sessions: many(sessions),
+  accounts: many(accounts)
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  users: one(users, {
+    fields: [sessions.userId],
+    references: [users.id]
+  })
+}));
+
+export const accountsRelations = relations(accounts, ({ one }) => ({
+  users: one(users, {
+    fields: [accounts.userId],
+    references: [users.id]
+  })
+}));
 
 export const projects = pgTable(
   "projects",
@@ -562,7 +582,7 @@ export const dbSchema = {
   users,
   sessions,
   accounts,
-  verificationTokens,
+  verifications,
   projects,
   projectMembers,
   uploads,

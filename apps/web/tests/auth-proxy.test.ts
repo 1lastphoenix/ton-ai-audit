@@ -25,8 +25,8 @@ describe("server auth export", () => {
     expect("handler" in auth).toBe(true);
   });
 
-  it("aliases verification tokens as verifications for better-auth drizzle adapter", () => {
+  it("exposes Better Auth verifications table in adapter schema", () => {
     const schema = getAuthAdapterSchema();
-    expect(schema.verifications).toBe(dbSchema.verificationTokens);
+    expect(schema.verifications).toBe(dbSchema.verifications);
   });
 });

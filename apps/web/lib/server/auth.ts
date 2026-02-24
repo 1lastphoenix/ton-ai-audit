@@ -14,10 +14,7 @@ const globalForAuth = globalThis as unknown as {
 };
 
 export function getAuthAdapterSchema() {
-  return {
-    ...dbSchema,
-    verifications: dbSchema.verificationTokens
-  };
+  return dbSchema;
 }
 
 export function getAuth() {
