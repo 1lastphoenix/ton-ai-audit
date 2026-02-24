@@ -279,6 +279,107 @@ function toErrorMessage(error) {
   return "Unknown error";
 }
 
+function parseProcessIdFromLockContent(content) {
+  if (typeof content !== "string") {
+    return null;
+  }
+
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const numericPid = Number.parseInt(trimmed, 10);
+  if (Number.isInteger(numericPid) && numericPid > 0) {
+    return numericPid;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    const pidCandidate = Number.parseInt(
+      String(parsed.pid ?? parsed.processId ?? parsed.processID ?? ""),
+      10
+    );
+    if (Number.isInteger(pidCandidate) && pidCandidate > 0) {
+      return pidCandidate;
+    }
+  } catch {
+    // lock file is not JSON
+  }
+
+  return null;
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error) {
+      return error.code === "EPERM";
+    }
+    return false;
+  }
+}
+
+function isWebDevAlreadyRunning(webLockPath) {
+  if (!fs.existsSync(webLockPath)) {
+    return false;
+  }
+
+  try {
+    const content = fs.readFileSync(webLockPath, "utf8");
+    const pid = parseProcessIdFromLockContent(content);
+
+    if (pid && isProcessAlive(pid)) {
+      return true;
+    }
+
+    fs.unlinkSync(webLockPath);
+    // eslint-disable-next-line no-console
+    console.log(`Removed stale Next.js dev lock at ${webLockPath}`);
+    return false;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error) {
+      const code = String(error.code ?? "");
+      if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+        return true;
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.warn(
+      `Unable to inspect Next.js dev lock at ${webLockPath}. ` +
+        `Assuming web dev is already running. Details: ${toErrorMessage(error)}`
+    );
+    return true;
+  }
+}
+
+async function canReachHttpOk(url, timeoutMs = 1_500) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function validateMinioCredentials(
   envObject,
   deps = {}
@@ -586,7 +687,27 @@ export async function runLocalDevPreflight(options = {}) {
         ? "Quick dev bootstrap passed. Launching web + worker dev servers..."
         : "Preflight passed. Launching web + worker dev servers..."
     );
-    runCommand(devServeCommand, envFromFile);
+
+    const webLockPath = path.resolve(process.cwd(), "apps", "web", ".next", "dev", "lock");
+    const webAlreadyRunning = isWebDevAlreadyRunning(webLockPath);
+    const workerAlreadyRunning = await canReachHttpOk("http://localhost:3010/healthz");
+
+    if (webAlreadyRunning && workerAlreadyRunning) {
+      // eslint-disable-next-line no-console
+      console.log("Web and worker dev servers are already running; nothing to start.");
+      return;
+    }
+
+    const filters = [];
+    if (!webAlreadyRunning) {
+      filters.push("--filter @ton-audit/web");
+    }
+    if (!workerAlreadyRunning) {
+      filters.push("--filter @ton-audit/worker");
+    }
+
+    const serveCommand = `pnpm --parallel ${filters.join(" ")} dev`;
+    runCommand(serveCommand, envFromFile);
   }
 }
 
