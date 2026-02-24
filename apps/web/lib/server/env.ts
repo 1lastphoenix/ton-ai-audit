@@ -1,9 +1,10 @@
 import { type z } from "zod";
 
-import { envConfigSchema, parseModelAllowlist } from "@ton-audit/shared";
+import { envConfigSchema, parseAdminEmails, parseModelAllowlist } from "@ton-audit/shared";
 
-type ParsedEnv = Omit<z.infer<typeof envConfigSchema>, "AUDIT_MODEL_ALLOWLIST"> & {
+type ParsedEnv = Omit<z.infer<typeof envConfigSchema>, "AUDIT_MODEL_ALLOWLIST" | "ADMIN_EMAILS"> & {
   AUDIT_MODEL_ALLOWLIST: string[];
+  ADMIN_EMAILS: string[];
 };
 
 let cachedEnv: ParsedEnv | null = null;
@@ -25,7 +26,8 @@ export function getEnv(): ParsedEnv {
 
   cachedEnv = {
     ...parsed.data,
-    AUDIT_MODEL_ALLOWLIST: parseModelAllowlist(parsed.data.AUDIT_MODEL_ALLOWLIST)
+    AUDIT_MODEL_ALLOWLIST: parseModelAllowlist(parsed.data.AUDIT_MODEL_ALLOWLIST),
+    ADMIN_EMAILS: parseAdminEmails(parsed.data.ADMIN_EMAILS)
   };
 
   return cachedEnv;

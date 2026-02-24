@@ -46,6 +46,9 @@ export async function executeSandboxPlan(params: {
 
   const response = await fetch(`${env.SANDBOX_RUNNER_URL}/execute`, {
     method: "POST",
+    // 2-minute hard timeout — sandbox runner itself enforces its own per-step
+    // timeout, but this guards against the runner process hanging entirely.
+    signal: AbortSignal.timeout(120_000),
     headers: {
       "Content-Type": "application/json"
     },

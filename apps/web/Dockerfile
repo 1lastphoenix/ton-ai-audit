@@ -5,6 +5,9 @@ ENV PATH=$PNPM_HOME:$PATH
 
 RUN corepack enable
 
+# Create non-root user before installing dependencies.
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -19,6 +22,11 @@ COPY . .
 ENV NODE_ENV=production
 
 RUN pnpm --filter @ton-audit/web build
+
+# Transfer ownership so the non-root user can write Next.js cache files.
+RUN chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 3000
 

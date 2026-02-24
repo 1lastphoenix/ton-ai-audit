@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { workingCopyPatchFileSchema } from "@ton-audit/shared";
 
 import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
-import { ensureProjectAccess, saveWorkingCopyFile } from "@/lib/server/domain";
+import { ensureProjectAccess, ensureWorkingCopyAccess, saveWorkingCopyFile } from "@/lib/server/domain";
 
 export async function PATCH(
   request: Request,
@@ -16,6 +16,11 @@ export async function PATCH(
     const project = await ensureProjectAccess(projectId, session.user.id);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const workingCopy = await ensureWorkingCopyAccess(workingCopyId, session.user.id, projectId);
+    if (!workingCopy) {
+      return NextResponse.json({ error: "Working copy not found" }, { status: 404 });
     }
 
     const body = await parseJsonBody(request, workingCopyPatchFileSchema);

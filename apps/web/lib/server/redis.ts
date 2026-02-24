@@ -20,14 +20,22 @@ export function getRedisConnection() {
     password: redisUrl.password || undefined,
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
-    lazyConnect: false
+    lazyConnect: false,
+    // Reconnect with exponential backoff, capped at 3 s.
+    retryStrategy: (times) => Math.min(times * 100, 3_000),
+    // Abort commands that have been waiting too long.
+    commandTimeout: 10_000,
+    // TCP keepalive so idle connections are not silently dropped by firewalls.
+    keepAlive: 30_000
   };
 
   const connection = new IORedis(redisOptions);
 
-  if (getEnv().NODE_ENV !== "production") {
-    globalForRedis.redisConnection = connection;
-  }
+  connection.on("error", (err) => {
+    console.error("[redis] Connection error:", err.message);
+  });
+
+  globalForRedis.redisConnection = connection;
 
   return connection;
 }

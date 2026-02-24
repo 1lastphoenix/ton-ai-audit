@@ -6,7 +6,17 @@ import { db } from "./db";
 import { env } from "./env";
 export { assertAllowedModel };
 
-export async function getAuditModelAllowlist() {
+// TTL cache so every audit request does not hit the database.
+const CACHE_TTL_MS = 30_000;
+let cachedAllowlist: string[] | null = null;
+let cacheExpiresAt = 0;
+
+export async function getAuditModelAllowlist(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedAllowlist && now < cacheExpiresAt) {
+    return cachedAllowlist;
+  }
+
   const setting = await db.query.systemSettings.findFirst({
     where: eq(systemSettings.key, "audit_model_allowlist")
   });
@@ -17,5 +27,10 @@ export async function getAuditModelAllowlist() {
         .filter(Boolean)
     : [];
 
-  return fromSetting.length ? fromSetting : env.AUDIT_MODEL_ALLOWLIST;
+  const result = fromSetting.length ? fromSetting : env.AUDIT_MODEL_ALLOWLIST;
+
+  cachedAllowlist = result;
+  cacheExpiresAt = now + CACHE_TTL_MS;
+
+  return result;
 }

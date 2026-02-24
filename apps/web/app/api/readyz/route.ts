@@ -14,11 +14,12 @@ export async function GET() {
       now: new Date().toISOString()
     });
   } catch (error) {
+    console.error("[readyz] Dependency check failed:", error);
     return NextResponse.json(
       {
         ok: false,
         service: "web",
-        error: error instanceof Error ? error.message : "Unknown readiness error"
+        error: "Dependency check failed"
       },
       { status: 503 }
     );

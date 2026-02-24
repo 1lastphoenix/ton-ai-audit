@@ -174,12 +174,13 @@ export const envConfigSchema = z.object({
   MINIO_ACCESS_KEY: z.string().min(1),
   MINIO_SECRET_KEY: z.string().min(1),
   MINIO_BUCKET: z.string().min(1),
-  BETTER_AUTH_SECRET: z.string().min(1),
+  BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET must be at least 32 characters"),
   GITHUB_CLIENT_ID: z.string().min(1),
   GITHUB_CLIENT_SECRET: z.string().min(1),
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_EMBEDDINGS_MODEL: z.string().min(1),
   AUDIT_MODEL_ALLOWLIST: z.string().default("openai/gpt-5"),
+  ADMIN_EMAILS: z.string().default(""),
   SANDBOX_RUNNER_URL: z.string().url().default("http://localhost:3003"),
   NEXT_PUBLIC_TON_LSP_WS_URL: z.string().default("ws://localhost:3002"),
   NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000"),
@@ -192,5 +193,12 @@ export function parseModelAllowlist(value: string): string[] {
   return value
     .split(",")
     .map((model) => model.trim())
+    .filter(Boolean);
+}
+
+export function parseAdminEmails(value: string): string[] {
+  return value
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 }

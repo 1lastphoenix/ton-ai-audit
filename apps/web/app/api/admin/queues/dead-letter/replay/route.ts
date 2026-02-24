@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { jobStepSchema } from "@ton-audit/shared";
 
-import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
+import { parseJsonBody, requireAdminSession, toApiErrorResponse } from "@/lib/server/api";
 import { replayDeadLetterJob } from "@/lib/server/queues";
 
 const replaySchema = z.object({
@@ -13,7 +13,7 @@ const replaySchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    await requireSession(request);
+    await requireAdminSession(request);
     const body = await parseJsonBody(request, replaySchema);
     const replay = await replayDeadLetterJob(body.queue, body.jobId);
 

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { ZodSchema } from "zod";
 
 import { auth } from "./auth";
+import { getEnv } from "./env";
+import { isRateLimited } from "./rate-limit";
 
 export class ApiError extends Error {
   statusCode: number;
@@ -39,6 +41,37 @@ export async function requireSession(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user?.id) {
     throw new ApiError("Unauthorized", 401);
+  }
+
+  return session;
+}
+
+/**
+ * Throws a 429 ApiError if the given (userId, endpoint) combination has
+ * exceeded the allowed rate within the sliding window.
+ *
+ * @param userId   The authenticated user's ID.
+ * @param endpoint A short identifier for the endpoint (e.g. "create-project").
+ * @param limit    Max requests per window (default 10).
+ * @param windowMs Window duration in ms (default 60 s).
+ */
+export function checkRateLimit(
+  userId: string,
+  endpoint: string,
+  limit = 10,
+  windowMs = 60_000
+) {
+  if (isRateLimited(`${userId}:${endpoint}`, limit, windowMs)) {
+    throw new ApiError("Too many requests. Please slow down.", 429);
+  }
+}
+
+export async function requireAdminSession(request: Request) {
+  const session = await requireSession(request);
+  const adminEmails = getEnv().ADMIN_EMAILS;
+
+  if (adminEmails.length === 0 || !adminEmails.includes(session.user.email.toLowerCase())) {
+    throw new ApiError("Forbidden", 403);
   }
 
   return session;
@@ -127,6 +160,7 @@ export function toApiErrorResponse(error: unknown) {
     return jsonError(error.message, error.statusCode);
   }
 
+  // Map known Postgres unique violation constraints to user-friendly messages.
   const code = getPgErrorCode(error);
   if (code === "23505") {
     const constraint = getPgConstraint(error);
@@ -157,6 +191,13 @@ export function toApiErrorResponse(error: unknown) {
   }
 
   if (error instanceof Error) {
+    // Do not expose raw error messages to clients in production — they may
+    // contain database URLs, internal stack traces, or other sensitive data.
+    const isProduction = getEnv().NODE_ENV === "production";
+    if (isProduction) {
+      console.error("[api] Unhandled server error:", error);
+      return jsonError("Internal server error", 500);
+    }
     return jsonError(error.message, 500);
   }
 

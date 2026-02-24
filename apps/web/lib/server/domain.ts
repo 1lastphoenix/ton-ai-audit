@@ -67,6 +67,20 @@ export async function ensureProjectOwnerAccess(projectId: string, userId: string
   });
 }
 
+export async function ensureWorkingCopyAccess(
+  workingCopyId: string,
+  userId: string,
+  projectId: string
+) {
+  return db.query.workingCopies.findFirst({
+    where: and(
+      eq(workingCopies.id, workingCopyId),
+      eq(workingCopies.ownerUserId, userId),
+      eq(workingCopies.projectId, projectId)
+    )
+  });
+}
+
 export async function createProject(input: {
   ownerUserId: string;
   name: string;
@@ -78,27 +92,30 @@ export async function createProject(input: {
     throw new Error("Invalid project lifecycle state");
   }
 
-  const [project] = await db
-    .insert(projects)
-    .values({
-      ownerUserId: input.ownerUserId,
-      name: input.name,
-      slug: input.slug,
-      lifecycleState
-    })
-    .returning();
+  // Wrap project + member creation in a transaction so both succeed or both fail.
+  return db.transaction(async (tx) => {
+    const [project] = await tx
+      .insert(projects)
+      .values({
+        ownerUserId: input.ownerUserId,
+        name: input.name,
+        slug: input.slug,
+        lifecycleState
+      })
+      .returning();
 
-  if (!project) {
-    throw new Error("Failed to create project");
-  }
+    if (!project) {
+      throw new Error("Failed to create project");
+    }
 
-  await db.insert(projectMembers).values({
-    projectId: project.id,
-    userId: input.ownerUserId,
-    role: "owner"
+    await tx.insert(projectMembers).values({
+      projectId: project.id,
+      userId: input.ownerUserId,
+      role: "owner"
+    });
+
+    return project;
   });
-
-  return project;
 }
 
 type ScaffoldFile = {

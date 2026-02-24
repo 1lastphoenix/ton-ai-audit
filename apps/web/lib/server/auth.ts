@@ -46,9 +46,7 @@ export function getAuth() {
     trustedOrigins: [env.NEXT_PUBLIC_APP_URL]
   });
 
-  if (env.NODE_ENV !== "production") {
-    globalForAuth.auth = auth;
-  }
+  globalForAuth.auth = auth;
 
   return auth;
 }

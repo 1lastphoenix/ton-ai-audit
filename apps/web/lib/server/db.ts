@@ -19,12 +19,14 @@ export function getPool() {
 
   const env = getEnv();
   const pool = new Pool({
-    connectionString: env.DATABASE_URL
+    connectionString: env.DATABASE_URL,
+    // Production-safe pool configuration.
+    max: 20,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000
   });
 
-  if (env.NODE_ENV !== "production") {
-    globalForDb.pool = pool;
-  }
+  globalForDb.pool = pool;
 
   return pool;
 }
@@ -36,9 +38,7 @@ export function getDb() {
 
   const instance = drizzle(getPool(), { schema: dbSchema });
 
-  if (getEnv().NODE_ENV !== "production") {
-    globalForDb.db = instance;
-  }
+  globalForDb.db = instance;
 
   return instance;
 }

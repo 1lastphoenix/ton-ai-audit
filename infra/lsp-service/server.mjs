@@ -7,9 +7,31 @@ import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.PORT || 3002);
 const TON_LSP_COMMAND = process.env.TON_LSP_COMMAND || "node";
-const TON_LSP_ARGS = (process.env.TON_LSP_ARGS || "/opt/ton-language-server/dist/server.js --stdio")
-  .split(" ")
-  .filter(Boolean);
+
+// Accept TON_LSP_ARGS as a JSON array for correctness (args with spaces work),
+// falling back to space-split for backwards compatibility.
+function parseLspArgs(raw) {
+  if (!raw) {
+    return ["/opt/ton-language-server/dist/server.js", "--stdio"];
+  }
+
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.every((a) => typeof a === "string")) {
+        return parsed;
+      }
+    } catch {
+      // Fall through to space-split.
+    }
+  }
+
+  return trimmed.split(" ").filter(Boolean);
+}
+
+const TON_LSP_ARGS = parseLspArgs(process.env.TON_LSP_ARGS);
+
 const REQUIRED_WASM_ASSETS = [
   "tree-sitter.wasm",
   "tree-sitter-tolk.wasm",
@@ -17,6 +39,10 @@ const REQUIRED_WASM_ASSETS = [
   "tree-sitter-fift.wasm",
   "tree-sitter-tlb.wasm"
 ];
+
+// Maximum WebSocket message size (1 MB). LSP messages are typically small JSON;
+// oversized frames likely indicate a client bug or abuse.
+const MAX_WS_MESSAGE_BYTES = 1 * 1024 * 1024;
 
 function resolveTonLspRoot() {
   const entry = TON_LSP_ARGS.find((arg) => arg.endsWith(".js"));
@@ -128,7 +154,8 @@ const httpServer = createServer((req, res) => {
   res.end(JSON.stringify({ error: "Not found" }));
 });
 
-const wss = new WebSocketServer({ server: httpServer, path: "/" });
+// Enforce per-message size limit at the WebSocket server level.
+const wss = new WebSocketServer({ server: httpServer, path: "/", maxPayload: MAX_WS_MESSAGE_BYTES });
 
 wss.on("connection", (ws) => {
   const lspAssetStatus = getLspAssetStatus();
@@ -181,6 +208,11 @@ wss.on("connection", (ws) => {
       return;
     }
     const payload = String(data);
+    // Extra guard: reject oversized payloads even if maxPayload was bypassed.
+    if (Buffer.byteLength(payload, "utf8") > MAX_WS_MESSAGE_BYTES) {
+      ws.close(1009, "Message too large");
+      return;
+    }
     lsp.stdin.write(frameLspMessage(payload));
   });
 

@@ -9,6 +9,13 @@ import { db } from "@/lib/server/db";
 import { ensureProjectAccess } from "@/lib/server/domain";
 import { canReadJobEvents } from "@/lib/server/job-events-auth";
 
+// Maximum time a single SSE connection is kept open (10 minutes).
+const MAX_STREAM_LIFETIME_MS = 10 * 60 * 1000;
+// Interval between DB polls.
+const POLL_INTERVAL_MS = 2_000;
+// Interval between SSE heartbeat comment lines (keeps proxies alive).
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
@@ -59,6 +66,18 @@ export async function GET(
     const stream = new ReadableStream({
       async start(controller) {
         let streamClosed = false;
+        let pollInterval: ReturnType<typeof setInterval> | undefined;
+        let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+        let lifetimeTimeout: ReturnType<typeof setTimeout> | undefined;
+
+        const close = () => {
+          if (streamClosed) return;
+          streamClosed = true;
+          clearInterval(pollInterval);
+          clearInterval(heartbeatInterval);
+          clearTimeout(lifetimeTimeout);
+          controller.close();
+        };
 
         const pollEvents = async () => {
           if (pollingInFlight || streamClosed) {
@@ -91,25 +110,38 @@ export async function GET(
               }
               controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             }
-          } catch {
+          } catch (error) {
+            console.error("[job-events] DB poll error:", {
+              jobId,
+              projectId,
+              error: error instanceof Error ? error.message : String(error)
+            });
             // Keep the stream open and let the next poll retry.
           } finally {
             pollingInFlight = false;
           }
         };
 
-        const interval = setInterval(() => {
+        pollInterval = setInterval(() => {
           void pollEvents();
-        }, 2_000);
+        }, POLL_INTERVAL_MS);
+
+        // Heartbeat: keeps reverse proxies and load balancers from closing idle connections.
+        heartbeatInterval = setInterval(() => {
+          if (!streamClosed) {
+            controller.enqueue(encoder.encode(": heartbeat\n\n"));
+          }
+        }, HEARTBEAT_INTERVAL_MS);
+
+        // Hard cap: close the stream after MAX_STREAM_LIFETIME_MS regardless.
+        lifetimeTimeout = setTimeout(() => {
+          close();
+        }, MAX_STREAM_LIFETIME_MS);
+
         void pollEvents();
 
         request.signal.addEventListener("abort", () => {
-          if (streamClosed) {
-            return;
-          }
-          streamClosed = true;
-          clearInterval(interval);
-          controller.close();
+          close();
         }, { once: true });
       }
     });

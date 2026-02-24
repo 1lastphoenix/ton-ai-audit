@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 
 import { acceptedUploadExtensions, normalizePath, uploadInitSchema, uploads } from "@ton-audit/shared";
 
-import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
+import { checkRateLimit, parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
 import { ensureProjectAccess } from "@/lib/server/domain";
 import { db } from "@/lib/server/db";
 import { env } from "@/lib/server/env";
@@ -23,6 +23,8 @@ export async function POST(
   try {
     const session = await requireSession(request);
     const { projectId } = await context.params;
+    // 20 upload initiations per minute per user.
+    checkRateLimit(session.user.id, "upload-init", 20, 60_000);
 
     const project = await ensureProjectAccess(projectId, session.user.id);
     if (!project) {
