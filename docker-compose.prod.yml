@@ -112,6 +112,8 @@ services:
       context: ./infra/lsp-service
       dockerfile: Dockerfile
     restart: unless-stopped
+    labels:
+      - traefik.docker.network=${PROXY_NETWORK:-dokploy-network}
     environment:
       PORT: 3002
       TON_LSP_COMMAND: node
@@ -130,6 +132,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
+    labels:
+      - traefik.docker.network=${PROXY_NETWORK:-dokploy-network}
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
