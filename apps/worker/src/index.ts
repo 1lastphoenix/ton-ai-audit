@@ -42,6 +42,10 @@ const queues = {
   cleanup: new Queue<JobPayloadMap["cleanup"]>(queueNames.cleanup, { connection: redisConnection })
 } as const;
 
+const jobHeartbeatMsRaw = Number(process.env.WORKER_JOB_HEARTBEAT_MS ?? 15_000);
+const JOB_HEARTBEAT_INTERVAL_MS =
+  Number.isFinite(jobHeartbeatMsRaw) && jobHeartbeatMsRaw > 0 ? jobHeartbeatMsRaw : 15_000;
+
 function extractPayloadContext(payload: unknown) {
   if (!payload || typeof payload !== "object") {
     return {};
@@ -85,6 +89,11 @@ function extractJobContext(job: Job<Record<string, unknown>, unknown, string> | 
     attempt: job.attemptsMade + 1,
     ...extractPayloadContext(job.data)
   };
+}
+
+function extractProjectId(job: Job<Record<string, unknown>, unknown, string>) {
+  const projectId = job.data?.projectId;
+  return typeof projectId === "string" ? projectId : null;
 }
 
 async function enqueueJob<Name extends keyof JobPayloadMap>(
@@ -201,9 +210,38 @@ function createWorker<Name extends JobStep>(
     queueName,
     async (job) => {
       const startedAt = Date.now();
-      const context = extractJobContext(job as unknown as Job<Record<string, unknown>, unknown, string>);
+      const jobWithContext = job as unknown as Job<Record<string, unknown>, unknown, string>;
+      const context = extractJobContext(jobWithContext);
+      const projectId = extractProjectId(jobWithContext);
+      let heartbeatCount = 0;
+      let heartbeatTimer: NodeJS.Timeout | null = null;
 
       workerLogger.info("worker.job.started", context);
+
+      if (projectId) {
+        heartbeatTimer = setInterval(() => {
+          heartbeatCount += 1;
+          const elapsedMs = Date.now() - startedAt;
+
+          void recordJobEvent({
+            projectId,
+            queue: jobWithContext.queueName,
+            jobId: String(jobWithContext.id),
+            event: "worker-heartbeat",
+            payload: {
+              heartbeat: heartbeatCount,
+              elapsedMs
+            }
+          }).catch((error) => {
+            workerLogger.error("worker.job.heartbeat.failed", {
+              ...context,
+              heartbeat: heartbeatCount,
+              elapsedMs,
+              error
+            });
+          });
+        }, JOB_HEARTBEAT_INTERVAL_MS);
+      }
 
       try {
         const result = await runWithTimeout(() => processor(job));
@@ -219,6 +257,10 @@ function createWorker<Name extends JobStep>(
           error
         });
         throw error;
+      } finally {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+        }
       }
     },
     {

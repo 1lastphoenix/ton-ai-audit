@@ -329,11 +329,15 @@ function TreeView(props: {
   onSelect: (path: string) => void;
   expandedDirectories: Set<string>;
   onToggleDirectory: (path: string) => void;
+  onContextNode?: (node: { path: string; type: "file" | "directory" }) => void;
   parentPath?: string | null;
   inlineNewFileDraft?: {
     parentPath: string | null;
     value: string;
     isBusy: boolean;
+    rowRef: {
+      current: HTMLDivElement | null;
+    };
     inputRef: {
       current: HTMLInputElement | null;
     };
@@ -349,6 +353,7 @@ function TreeView(props: {
     onSelect,
     expandedDirectories = new Set<string>(),
     onToggleDirectory = () => undefined,
+    onContextNode = () => undefined,
     parentPath = null,
     inlineNewFileDraft = null,
     depth = 0
@@ -362,6 +367,7 @@ function TreeView(props: {
       {shouldRenderInlineNewFile && inlineNewFileDraft ? (
         <li key={`new-file-${parentPath ?? "root"}`}>
           <div
+            ref={inlineNewFileDraft.rowRef}
             className="flex h-6 w-full items-center gap-1 rounded px-1 text-left text-xs"
             style={{ paddingLeft: `${depth * 12 + 22}px` }}
           >
@@ -400,6 +406,9 @@ function TreeView(props: {
                 variant="ghost"
                 size="sm"
                 onClick={() => onToggleDirectory(node.path)}
+                onContextMenu={() => {
+                  onContextNode({ path: node.path, type: "directory" });
+                }}
                 className="h-6 w-full justify-start gap-1 rounded px-1 text-left text-xs"
                 style={{ paddingLeft: `${depth * 12 + 4}px` }}
               >
@@ -414,6 +423,7 @@ function TreeView(props: {
                   onSelect={onSelect}
                   expandedDirectories={expandedDirectories}
                   onToggleDirectory={onToggleDirectory}
+                  onContextNode={onContextNode}
                   parentPath={node.path}
                   inlineNewFileDraft={inlineNewFileDraft}
                   depth={depth + 1}
@@ -430,6 +440,9 @@ function TreeView(props: {
               variant="ghost"
               size="sm"
               onClick={() => onSelect(node.path)}
+              onContextMenu={() => {
+                onContextNode({ path: node.path, type: "file" });
+              }}
               className={cn(
                 "h-6 w-full justify-start gap-1 rounded px-1 text-left text-xs",
                 selectedPath === node.path
@@ -483,12 +496,17 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [isInlineNewFile, setIsInlineNewFile] = useState(false);
   const [inlineNewFileName, setInlineNewFileName] = useState("new-module.tolk");
   const [inlineNewFileParentPath, setInlineNewFileParentPath] = useState<string | null>(null);
+  const [contextMenuTargetNode, setContextMenuTargetNode] = useState<{
+    path: string;
+    type: "file" | "directory";
+  } | null>(null);
   const [explorerQuery, setExplorerQuery] = useState("");
   const [isExplorerVisible, setIsExplorerVisible] = useState(true);
   const [isBottomPanelVisible, setIsBottomPanelVisible] = useState(true);
   const [isFindingsVisible, setIsFindingsVisible] = useState(true);
   const [prefersDark, setPrefersDark] = useState(false);
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
+  const inlineNewFileRowRef = useRef<HTMLDivElement | null>(null);
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const lastAuditStatusRef = useRef<string>("idle");
   const eventSourcesRef = useRef<Map<string, EventSource>>(new Map());
@@ -505,6 +523,18 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const isAuditInProgress = auditStatus === "queued" || auditStatus === "running";
   const filteredTree = useMemo(() => filterWorkbenchTree(tree, explorerQuery), [tree, explorerQuery]);
   const filteredFilePaths = useMemo(() => treeFiles(filteredTree), [filteredTree]);
+  const contextMenuParentPath = useMemo(() => {
+    if (!contextMenuTargetNode) {
+      return null;
+    }
+
+    if (contextMenuTargetNode.type === "directory") {
+      return contextMenuTargetNode.path;
+    }
+
+    const parents = getParentDirectories(contextMenuTargetNode.path);
+    return parents[parents.length - 1] ?? null;
+  }, [contextMenuTargetNode]);
   const monacoTheme = useMemo(
     () => resolveMonacoTheme({ resolvedTheme, prefersDark }),
     [prefersDark, resolvedTheme]
@@ -1010,6 +1040,33 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     newFileInputRef.current?.focus();
     newFileInputRef.current?.select();
+  }, [isInlineNewFile]);
+
+  useEffect(() => {
+    if (!isInlineNewFile) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (inlineNewFileRowRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsInlineNewFile(false);
+      setInlineNewFileName("new-module.tolk");
+      setInlineNewFileParentPath(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
   }, [isInlineNewFile]);
 
   useEffect(() => {
@@ -1621,9 +1678,20 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         </aside>
 
         {isExplorerVisible ? (
-        <ContextMenu>
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (!open) {
+              setContextMenuTargetNode(null);
+            }
+          }}
+        >
           <ContextMenuTrigger asChild>
-            <aside className="bg-muted/30 flex min-h-0 flex-col overflow-hidden border-b border-border p-3 lg:border-r lg:border-b-0">
+            <aside
+              className="bg-muted/30 flex min-h-0 flex-col overflow-hidden border-b border-border p-3 lg:border-r lg:border-b-0"
+              onContextMenuCapture={() => {
+                setContextMenuTargetNode(null);
+              }}
+            >
               <div className="mb-2 flex items-center gap-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1693,12 +1761,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                       onSelect={openFileInEditor}
                       expandedDirectories={treeViewExpandedDirectories}
                       onToggleDirectory={toggleDirectory}
+                      onContextNode={setContextMenuTargetNode}
                       inlineNewFileDraft={
                         isInlineNewFile
                           ? {
                               parentPath: inlineNewFileParentPath,
                               value: inlineNewFileName,
                               isBusy,
+                              rowRef: inlineNewFileRowRef,
                               inputRef: newFileInputRef,
                               onChange: setInlineNewFileName,
                               onSubmit: submitInlineNewFile,
@@ -1720,7 +1790,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
             <ContextMenuItem
               onSelect={(event) => {
                 event.preventDefault();
-                startInlineNewFile();
+                startInlineNewFile(contextMenuParentPath);
               }}
             >
               <FilePlus2 className="size-3.5" />
