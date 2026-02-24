@@ -33,7 +33,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [core]
+    networks:
+      core:
+        aliases:
+          - ${REDIS_HOST:-tonaudit-redis}
 
   minio:
     image: minio/minio:latest
@@ -49,7 +52,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [core]
+    networks:
+      core:
+        aliases:
+          - ${MINIO_HOST:-tonaudit-minio}
 
   minio-init:
     image: minio/mc:latest
@@ -59,6 +65,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_HOST: ${MINIO_HOST:-tonaudit-minio}
       MINIO_BUCKET: ${MINIO_BUCKET:-ton-audit}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
@@ -77,7 +84,7 @@ services:
         echo 'MINIO_ACCESS_KEY matches MINIO_ROOT_USER but MINIO_SECRET_KEY differs from MINIO_ROOT_PASSWORD.' >&2;
         exit 1;
       fi;
-      until /usr/bin/mc alias set local http://minio:9000 \"$${ROOT_USER}\" \"$${ROOT_PASSWORD}\"; do sleep 1; done;
+      until /usr/bin/mc alias set local http://$${MINIO_HOST}:9000 \"$${ROOT_USER}\" \"$${ROOT_PASSWORD}\"; do sleep 1; done;
       /usr/bin/mc mb --ignore-existing local/$${BUCKET};
       /usr/bin/mc anonymous set none local/$${BUCKET};
       if [ \"$${APP_ACCESS_KEY}\" != \"$${ROOT_USER}\" ]; then
@@ -162,11 +169,11 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@${POSTGRES_HOST:-tonaudit-db}:5432/${POSTGRES_DB:-ton_audit}}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      REDIS_URL: ${REDIS_URL:-redis://${REDIS_HOST:-tonaudit-redis}:6379}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://${MINIO_HOST:-tonaudit-minio}:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:?set MINIO_ROOT_USER}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: ${MINIO_BUCKET:-ton-audit}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}
@@ -225,11 +232,11 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@${POSTGRES_HOST:-tonaudit-db}:5432/${POSTGRES_DB:-ton_audit}}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      REDIS_URL: ${REDIS_URL:-redis://${REDIS_HOST:-tonaudit-redis}:6379}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://${MINIO_HOST:-tonaudit-minio}:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:?set MINIO_ROOT_USER}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: ${MINIO_BUCKET:-ton-audit}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}

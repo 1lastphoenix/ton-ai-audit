@@ -44,7 +44,10 @@ One-liner full local verification:
 - Use `docker-compose.prod.yml`: `docker compose -f docker-compose.prod.yml --env-file .env up -d --build`
 - Set `DB_PASSWORD` once as the canonical Postgres credential source.
 - Set `POSTGRES_HOST=tonaudit-db` (default) to use a unique internal DB hostname and avoid Docker DNS collisions.
+- Set `REDIS_HOST=tonaudit-redis` and `MINIO_HOST=tonaudit-minio` (defaults) to avoid cross-stack service-name collisions.
 - `DATABASE_URL` is auto-derived from `DB_PASSWORD`, `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_HOST` unless you explicitly override it.
+- `REDIS_URL` and `MINIO_ENDPOINT` default to `REDIS_HOST` / `MINIO_HOST` unless explicitly overridden.
+- Leave `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` unset to reuse root credentials by default; if you set app creds, set both and keep them aligned with `minio-init`.
 - A one-shot `migrate` service runs Drizzle migrations and `web`/`worker` wait for it to complete successfully.
 - The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.
 - Internal trust-zone services run on `core` internal network.
