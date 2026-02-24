@@ -38,6 +38,7 @@ One-liner full local verification:
 
 ## Production deployment
 
+- Start from the production template: `cp .env.production.example .env`
 - Use `docker-compose.prod.yml`: `docker compose -f docker-compose.prod.yml --env-file .env up -d --build`
 - The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.
 - Internal trust-zone services run on `core` internal network.
