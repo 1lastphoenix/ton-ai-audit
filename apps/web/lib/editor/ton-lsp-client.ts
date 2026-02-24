@@ -117,20 +117,44 @@ export function startTonLspClient(params: {
   wsUrl: string;
   onStatus: (status: TonLspStatus) => void;
 }) {
+  type TonLanguageClient = {
+    isRunning?: () => boolean;
+    start: () => Promise<void>;
+    stop: (timeout?: number) => Promise<void>;
+  };
+
   const webSocket = new WebSocket(params.wsUrl);
-  let languageClient: { start: () => void; stop: () => Promise<void> } | null = null;
+  let languageClient: TonLanguageClient | null = null;
   let disposed = false;
+  let hasError = false;
 
   params.onStatus("connecting");
 
+  const setStatus = (status: TonLspStatus) => {
+    if (disposed) {
+      return;
+    }
+
+    if (status === "error") {
+      hasError = true;
+    }
+
+    params.onStatus(status);
+  };
+
   const stopClient = async () => {
     if (languageClient) {
+      const client = languageClient;
+      languageClient = null;
+
       try {
-        await languageClient.stop();
+        if (typeof client.isRunning === "function" && !client.isRunning()) {
+          return;
+        }
+        await client.stop();
       } catch {
         // Ignore shutdown races.
       }
-      languageClient = null;
     }
   };
 
@@ -142,60 +166,79 @@ export function startTonLspClient(params: {
 
       try {
         await ensureMonacoVscodeApiReady();
-      } catch {
-        params.onStatus("error");
-        webSocket.close();
-        return;
-      }
+        if (disposed) {
+          return;
+        }
 
-      const [{ MonacoLanguageClient }, { CloseAction, ErrorAction }, wsJsonRpc] = await Promise.all([
-        import("monaco-languageclient"),
-        import("vscode-languageclient/browser.js"),
-        import("vscode-ws-jsonrpc")
-      ]);
+        const [{ MonacoLanguageClient }, { CloseAction, ErrorAction }, wsJsonRpc] = await Promise.all([
+          import("monaco-languageclient"),
+          import("vscode-languageclient/browser.js"),
+          import("vscode-ws-jsonrpc")
+        ]);
+        if (disposed) {
+          return;
+        }
 
-      const { toSocket, WebSocketMessageReader, WebSocketMessageWriter } = wsJsonRpc;
-      const socket = toSocket(webSocket);
-      const reader = new WebSocketMessageReader(socket);
-      const writer = new WebSocketMessageWriter(socket);
+        const { toSocket, WebSocketMessageReader, WebSocketMessageWriter } = wsJsonRpc;
+        const socket = toSocket(webSocket);
+        const reader = new WebSocketMessageReader(socket);
+        const writer = new WebSocketMessageWriter(socket);
 
-      languageClient = new MonacoLanguageClient({
-        id: "ton-language-server",
-        name: "TON Language Server",
-        clientOptions: {
-          documentSelector: TON_LANGUAGE_IDS.map((language) => ({ language })),
-          errorHandler: {
-            error: () => ({ action: ErrorAction.Continue }),
-            closed: () => ({ action: CloseAction.DoNotRestart })
+        const client = new MonacoLanguageClient({
+          id: "ton-language-server",
+          name: "TON Language Server",
+          clientOptions: {
+            documentSelector: TON_LANGUAGE_IDS.map((language) => ({ language })),
+            errorHandler: {
+              error: () => ({ action: ErrorAction.Continue }),
+              closed: () => ({ action: CloseAction.DoNotRestart })
+            }
+          },
+          messageTransports: {
+            reader,
+            writer
           }
-        },
-        messageTransports: {
-          reader,
-          writer
-        }
-      });
+        }) as TonLanguageClient;
+        const originalStop = client.stop.bind(client);
+        client.stop = async (timeout?: number) => {
+          if (typeof client.isRunning === "function" && !client.isRunning()) {
+            return;
+          }
 
-      languageClient.start();
-      reader.onClose(async () => {
+          try {
+            await originalStop(timeout);
+          } catch {
+            // Suppress stop races when initialization never reached the running state.
+          }
+        };
+        languageClient = client;
+
+        reader.onClose(async () => {
+          await stopClient();
+          if (!disposed && !hasError) {
+            params.onStatus("disconnected");
+          }
+        });
+
+        await client.start();
+        setStatus("connected");
+      } catch {
+        setStatus("error");
         await stopClient();
-        if (!disposed) {
-          params.onStatus("disconnected");
+        if (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING) {
+          webSocket.close();
         }
-      });
-
-      params.onStatus("connected");
+      }
     })();
   });
 
   webSocket.addEventListener("error", () => {
-    if (!disposed) {
-      params.onStatus("error");
-    }
+    setStatus("error");
   });
 
   webSocket.addEventListener("close", async () => {
     await stopClient();
-    if (!disposed) {
+    if (!disposed && !hasError) {
       params.onStatus("disconnected");
     }
   });

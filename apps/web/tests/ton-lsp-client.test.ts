@@ -19,4 +19,12 @@ describe("ton lsp client bootstrap", () => {
     expect(source).toContain("setMonarchTokensProvider(\"tolk\"");
     expect(source).toContain("setLanguageConfiguration(\"tolk\"");
   });
+
+  it("guards shutdown during failed initialization to avoid stop-state races", () => {
+    const filePath = path.resolve(process.cwd(), "lib", "editor", "ton-lsp-client.ts");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("if (typeof client.isRunning === \"function\" && !client.isRunning())");
+    expect(source).toContain("await client.start()");
+  });
 });

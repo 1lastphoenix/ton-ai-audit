@@ -5,7 +5,7 @@ import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.PORT || 3002);
 const TON_LSP_COMMAND = process.env.TON_LSP_COMMAND || "node";
-const TON_LSP_ARGS = (process.env.TON_LSP_ARGS || "/opt/ton-language-server/server.js --stdio")
+const TON_LSP_ARGS = (process.env.TON_LSP_ARGS || "/opt/ton-language-server/dist/server.js --stdio")
   .split(" ")
   .filter(Boolean);
 

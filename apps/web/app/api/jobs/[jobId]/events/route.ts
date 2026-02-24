@@ -9,8 +9,6 @@ import { db } from "@/lib/server/db";
 import { ensureProjectAccess } from "@/lib/server/domain";
 import { canReadJobEvents } from "@/lib/server/job-events-auth";
 
-const MAX_TRACKED_EVENT_IDS = 512;
-
 export async function GET(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
@@ -47,7 +45,6 @@ export async function GET(
 
     const encoder = new TextEncoder();
     let lastTimestamp = new Date(0);
-    const deliveredEventIds: string[] = [];
     const deliveredEventIdSet = new Set<string>();
     let pollingInFlight = false;
 
@@ -55,17 +52,7 @@ export async function GET(
       if (deliveredEventIdSet.has(eventId)) {
         return false;
       }
-
       deliveredEventIdSet.add(eventId);
-      deliveredEventIds.push(eventId);
-
-      if (deliveredEventIds.length > MAX_TRACKED_EVENT_IDS) {
-        const oldestEventId = deliveredEventIds.shift();
-        if (oldestEventId) {
-          deliveredEventIdSet.delete(oldestEventId);
-        }
-      }
-
       return true;
     };
 
