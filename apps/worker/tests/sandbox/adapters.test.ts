@@ -39,6 +39,13 @@ describe("planSandboxVerification", () => {
     expect(optionalBlueprintSteps.every((step) => step.timeoutMs <= 90_000)).toBe(true);
   });
 
+  it("does not schedule blueprint-test for non-blueprint plans", () => {
+    const plan = planSandboxVerification([{ path: "contracts/main.tolk", content: "" }]);
+
+    expect(plan.adapter).not.toBe("blueprint");
+    expect(plan.steps.some((step) => step.action === "blueprint-test")).toBe(false);
+  });
+
   it("returns none when no supported files are present", () => {
     const plan = planSandboxVerification([{ path: "README.md", content: "" }]);
 

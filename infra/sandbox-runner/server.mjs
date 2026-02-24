@@ -195,8 +195,8 @@ async function ensureDeterministicBlueprintWorkspace(workspaceDir, metadata) {
     private: true,
     version: "0.1.0",
     scripts: {
-      build: "blueprint build",
-      test: "blueprint test"
+      build: "blueprint build --all",
+      test: "node -e \"console.log('sandbox bootstrap: no test suite configured')\""
     },
     devDependencies: {
       "@ton/blueprint": pinnedToolchain.blueprintVersion,

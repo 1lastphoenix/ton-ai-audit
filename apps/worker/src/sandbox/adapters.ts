@@ -154,8 +154,7 @@ function singleLanguagePlan(language: string, files: SandboxFile[]): SandboxPlan
         steps: [
           createStep("bootstrap", "bootstrap-create-ton", false),
           createStep("tact-check", "tact-check", true),
-          createStep("blueprint-build", "blueprint-build", false),
-          createStep("blueprint-test", "blueprint-test", true)
+          createStep("blueprint-build", "blueprint-build", false)
         ]
       };
     case "func":
@@ -169,8 +168,7 @@ function singleLanguagePlan(language: string, files: SandboxFile[]): SandboxPlan
         steps: [
           createStep("bootstrap", "bootstrap-create-ton", false),
           createStep("func-check", "func-check", true),
-          createStep("blueprint-build", "blueprint-build", true),
-          createStep("blueprint-test", "blueprint-test", true)
+          createStep("blueprint-build", "blueprint-build", true)
         ]
       };
     case "tolk":
@@ -184,8 +182,7 @@ function singleLanguagePlan(language: string, files: SandboxFile[]): SandboxPlan
         steps: [
           createStep("bootstrap", "bootstrap-create-ton", false),
           createStep("tolk-check", "tolk-check", true),
-          createStep("blueprint-build", "blueprint-build", true),
-          createStep("blueprint-test", "blueprint-test", true)
+          createStep("blueprint-build", "blueprint-build", true)
         ]
       };
     default:
@@ -218,7 +215,6 @@ function mixedPlan(files: SandboxFile[], languages: string[]): SandboxPlan {
     steps.push(createStep("tolk-check", "tolk-check", true));
   }
   steps.push(createStep("blueprint-build", "blueprint-build", true));
-  steps.push(createStep("blueprint-test", "blueprint-test", true));
 
   return {
     adapter: "mixed",

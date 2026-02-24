@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { isUuid } from "@/lib/uuid";
 
 type UploadInitResponse = {
   uploadId: string;
@@ -278,17 +279,21 @@ export function ProjectCreateForm() {
       }
 
       const payload = (await response.json()) as { project: { id: string } };
+      const projectId = payload?.project?.id;
+      if (!isUuid(projectId)) {
+        throw new Error("Project creation succeeded but returned an invalid project id.");
+      }
 
       if (mode === "scaffold") {
         setCleanupOnClose(false);
         setOpen(false);
         resetState();
-        router.push(`/projects/${payload.project.id}`);
+        router.push(`/projects/${projectId}`);
         router.refresh();
         return;
       }
 
-      setCreatedProjectId(payload.project.id);
+      setCreatedProjectId(projectId);
       setStep("upload");
       setCleanupOnClose(true);
       setPhase("idle");
@@ -303,6 +308,10 @@ export function ProjectCreateForm() {
   async function onUploadSubmit() {
     if (!createdProjectId || files.length === 0) {
       setError("Select at least one source file or one ZIP archive.");
+      return;
+    }
+    if (!isUuid(createdProjectId)) {
+      setError("Invalid project id. Please restart project creation.");
       return;
     }
 

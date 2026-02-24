@@ -4,6 +4,7 @@ import { ProjectWorkspace } from "@/components/projects/project-workspace";
 import { ensureProjectAccess, getLatestProjectState } from "@/lib/server/domain";
 import { getAuditModelAllowlist } from "@/lib/server/model-allowlist";
 import { requireServerSession } from "@/lib/server/session";
+import { isUuid } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export default async function ProjectPage(props: {
 }) {
   const session = await requireServerSession();
   const { projectId } = await props.params;
+  if (!isUuid(projectId)) {
+    notFound();
+  }
 
   const project = await ensureProjectAccess(projectId, session.user.id);
   if (!project || project.lifecycleState !== "ready") {

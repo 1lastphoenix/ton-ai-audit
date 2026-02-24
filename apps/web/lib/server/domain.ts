@@ -32,10 +32,16 @@ import {
   pdfExports
 } from "@ton-audit/shared";
 
+import { isUuid } from "@/lib/uuid";
+
 import { db } from "./db";
 import { getObjectText, putObject } from "./s3";
 
 export async function ensureProjectAccess(projectId: string, userId: string) {
+  if (!isUuid(projectId)) {
+    return null;
+  }
+
   const ownedProject = await db.query.projects.findFirst({
     where: and(
       eq(projects.id, projectId),
@@ -62,6 +68,10 @@ export async function ensureProjectAccess(projectId: string, userId: string) {
 }
 
 export async function ensureProjectOwnerAccess(projectId: string, userId: string) {
+  if (!isUuid(projectId)) {
+    return null;
+  }
+
   return db.query.projects.findFirst({
     where: and(
       eq(projects.id, projectId),
@@ -76,6 +86,10 @@ export async function ensureWorkingCopyAccess(
   userId: string,
   projectId: string
 ) {
+  if (!isUuid(workingCopyId) || !isUuid(projectId)) {
+    return null;
+  }
+
   return db.query.workingCopies.findFirst({
     where: and(
       eq(workingCopies.id, workingCopyId),
