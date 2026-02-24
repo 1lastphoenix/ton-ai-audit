@@ -17,7 +17,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [core]
+    networks:
+      core:
+        aliases:
+          - ${POSTGRES_HOST:-tonaudit-db}
 
   redis:
     image: redis:7-alpine
@@ -134,7 +137,7 @@ services:
     restart: "no"
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-ton_audit}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@${POSTGRES_HOST:-tonaudit-db}:5432/${POSTGRES_DB:-ton_audit}}
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,7 +161,7 @@ services:
       - traefik.docker.network=${PROXY_NETWORK:-dokploy-network}
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-ton_audit}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@${POSTGRES_HOST:-tonaudit-db}:5432/${POSTGRES_DB:-ton_audit}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
@@ -221,7 +224,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-ton_audit}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ton}:${DB_PASSWORD:?set DB_PASSWORD}@${POSTGRES_HOST:-tonaudit-db}:5432/${POSTGRES_DB:-ton_audit}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}

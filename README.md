@@ -43,7 +43,8 @@ One-liner full local verification:
 - Start from the production template: `cp .env.production.example .env`
 - Use `docker-compose.prod.yml`: `docker compose -f docker-compose.prod.yml --env-file .env up -d --build`
 - Set `DB_PASSWORD` once as the canonical Postgres credential source.
-- `DATABASE_URL` is auto-derived from `DB_PASSWORD`, `POSTGRES_USER`, and `POSTGRES_DB` unless you explicitly override it.
+- Set `POSTGRES_HOST=tonaudit-db` (default) to use a unique internal DB hostname and avoid Docker DNS collisions.
+- `DATABASE_URL` is auto-derived from `DB_PASSWORD`, `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_HOST` unless you explicitly override it.
 - A one-shot `migrate` service runs Drizzle migrations and `web`/`worker` wait for it to complete successfully.
 - The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.
 - Internal trust-zone services run on `core` internal network.
