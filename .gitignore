@@ -55,3 +55,5 @@ pnpm_store/
 # sandbox and runtime artifacts
 .sandbox-workspaces/
 tmp/
+
+.pnpm-store/
