@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -10,33 +9,26 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type ReactNode,
 } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useTheme } from "next-themes";
 import {
-  CircleAlert,
-  ChevronDown,
-  ChevronRight,
   FileCode2,
   FilePlus2,
-  Folder,
   FolderTree,
-  FolderOpen,
   MoreHorizontal,
   RefreshCcw,
   Shield,
   TerminalSquare,
   Upload,
   X,
-  type LucideIcon,
 } from "lucide-react";
 
 import {
   detectLanguageFromPath,
-  normalizePath,
   type Language,
+  normalizePath,
 } from "@ton-audit/shared";
 
 import { Button } from "@/components/ui/button";
@@ -67,12 +59,7 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   registerTonLanguages,
   startTonLspClient,
@@ -82,1314 +69,81 @@ import { cn } from "@/lib/utils";
 import {
   filterWorkbenchTree,
   resolveMonacoTheme,
-  type WorkbenchTreeNode,
 } from "@/components/workbench/workbench-ui-utils";
 import { WorkbenchExecutionTracker } from "@/components/workbench/workbench-execution-tracker";
 import { WorkbenchAuditHistoryList } from "@/components/workbench/workbench-audit-history-list";
 import { WorkbenchTopToolbar } from "@/components/workbench/workbench-top-toolbar";
 import { WorkbenchFindingsPanel } from "@/components/workbench/workbench-findings-panel";
-
-type TreeNode = WorkbenchTreeNode;
-
-type FindingPayload = {
-  title: string;
-  severity: string;
-  summary: string;
-  impact?: string;
-  likelihood?: string;
-  exploitPath?: string;
-  confidence?: number;
-  remediation: string;
-  taxonomy?: Array<{
-    standard: "owasp-sc" | "cwe" | "swc";
-    id: string;
-    title?: string;
-  }>;
-  cvssV31?: {
-    vector: string;
-    baseScore: number;
-    severity?: "none" | "low" | "medium" | "high" | "critical";
-  };
-  preconditions?: string[];
-  attackScenario?: string;
-  affectedContracts?: string[];
-  exploitability?: string;
-  businessImpact?: string;
-  technicalImpact?: string;
-  fixPriority?: "p0" | "p1" | "p2" | "p3";
-  verificationPlan?: string[];
-  evidence: {
-    filePath: string;
-    startLine: number;
-    endLine: number;
-    snippet: string;
-  };
-};
-
-type AuditFindingInstance = {
-  id: string;
-  payloadJson: FindingPayload;
-  severity: string;
-};
-
-type PdfExportStatus =
-  | "not_requested"
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed";
-
-type AuditHistoryItem = {
-  id: string;
-  revisionId: string;
-  revisionSource: "upload" | "working-copy";
-  revisionDescription: string | null;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  profile: AuditProfile;
-  engineVersion: string;
-  reportSchemaVersion: number;
-  primaryModelId: string;
-  fallbackModelId: string;
-  findingCount: number;
-  pdfStatus: PdfExportStatus;
-  pdfStatusByVariant?: {
-    client?: PdfExportStatus;
-    internal?: PdfExportStatus;
-  };
-};
-
-type AuditCompareItem = {
-  findingId: string;
-  title: string;
-  severity: string;
-  filePath: string;
-  startLine: number;
-};
-
-type AuditCompareResponse = {
-  fromAudit: {
-    id: string;
-    revisionId: string;
-    createdAt: string;
-    findingCount: number;
-  };
-  toAudit: {
-    id: string;
-    revisionId: string;
-    createdAt: string;
-    findingCount: number;
-  };
-  summary: {
-    findings: {
-      fromTotal: number;
-      toTotal: number;
-      newCount: number;
-      resolvedCount: number;
-      persistingCount: number;
-      severityChangedCount: number;
-    };
-    files: {
-      addedCount: number;
-      removedCount: number;
-      unchangedCount: number;
-    };
-  };
-  findings: {
-    newlyDetected: AuditCompareItem[];
-    resolved: AuditCompareItem[];
-    persisting: Array<
-      Omit<AuditCompareItem, "severity"> & {
-        fromSeverity: string;
-        toSeverity: string;
-      }
-    >;
-  };
-  files: {
-    added: string[];
-    removed: string[];
-    unchanged: string[];
-  };
-};
-
-type WorkbenchLogLevel = "info" | "warn" | "error";
-type WorkbenchLogEntry = {
-  id: string;
-  createdAt: string;
-  level: WorkbenchLogLevel;
-  message: string;
-};
-
-type WorkbenchFileEntry = {
-  content: string;
-  language: Language;
-};
-
-type AuditProfile = "fast" | "deep";
-
-type VerifyProgressStepStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped"
-  | "timeout";
-
-type VerifyProgressStep = {
-  id: string;
-  action: string;
-  status: VerifyProgressStepStatus;
-  optional: boolean;
-  timeoutMs: number;
-  durationMs: number | null;
-};
-
-type VerifyProgressPhase =
-  | "idle"
-  | "security-scan"
-  | "plan-ready"
-  | "sandbox-running"
-  | "sandbox-completed"
-  | "sandbox-failed"
-  | "sandbox-skipped"
-  | "completed"
-  | "failed";
-
-type VerifyProgressState = {
-  phase: VerifyProgressPhase;
-  totalSteps: number;
-  currentStepId: string | null;
-  toolchain: string | null;
-  sandboxAdapter: string | null;
-  mode: string | null;
-  steps: VerifyProgressStep[];
-};
-
-const auditPipelineStageDefinitions = [
-  {
-    id: "verify-plan",
-    label: "Verification Plan",
-    description: "Plan compilation, toolchain detection, and adapter selection.",
-  },
-  {
-    id: "security-scans",
-    label: "Security Scans",
-    description: "Deterministic security rules and surface scans.",
-  },
-  {
-    id: "sandbox-checks",
-    label: "Sandbox Checks",
-    description: "Command-mapped sandbox execution of verification steps.",
-  },
-  {
-    id: "agent-discovery",
-    label: "Agent Discovery",
-    description: "Initial finding candidate discovery pass.",
-  },
-  {
-    id: "agent-validation",
-    label: "Agent Validation",
-    description: "Adversarial validation pass (deep profile).",
-  },
-  {
-    id: "agent-synthesis",
-    label: "Agent Synthesis",
-    description: "Final synthesis pass into strict report schema.",
-  },
-  {
-    id: "quality-gate",
-    label: "Report Quality Gate",
-    description: "Taxonomy, CVSS, and quality checks before acceptance.",
-  },
-] as const;
-
-type AuditPipelineStageId =
-  (typeof auditPipelineStageDefinitions)[number]["id"];
-type AuditPipelineStageStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
-type AuditPipelineStatus =
-  | "idle"
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed";
-type AuditPipelineStageState = {
-  status: AuditPipelineStageStatus;
-  detail: string | null;
-  updatedAt: number | null;
-};
-type AuditPipelineState = {
-  profile: AuditProfile | null;
-  status: AuditPipelineStatus;
-  currentStageId: AuditPipelineStageId | null;
-  stages: Record<AuditPipelineStageId, AuditPipelineStageState>;
-};
-
-type BackendJobEvent = {
-  id: string;
-  projectId: string | null;
-  queue: string;
-  jobId: string;
-  event: string;
-  payload: Record<string, unknown>;
-  createdAt: string;
-};
-
-type TonWorkbenchProps = {
-  projectId: string;
-  projectName: string;
-  initialRevisionId: string | null;
-  initialAuditId: string | null;
-  initialWorkingCopyId: string | null;
-  modelAllowlist: string[];
-};
-
-type ExplorerActionConfig = {
-  id: string;
-  dropdownLabel: string;
-  contextLabel: string;
-  icon: LucideIcon;
-  onDropdownSelect: () => void;
-  onContextSelect: () => void;
-};
-
-type RailToggleConfig = {
-  id: string;
-  active: boolean;
-  icon: LucideIcon;
-  ariaLabel: string;
-  title?: string;
-  onClick: () => void;
-};
-
-type RightPanelTab = "findings" | "audit-history";
-type FindingSeverityFilter =
-  | "all"
-  | "critical"
-  | "high"
-  | "medium"
-  | "low"
-  | "other";
-
-const bottomPanelTabConfig = [
-  { id: "audit-log", label: "Audit Log", icon: TerminalSquare },
-  { id: "problems", label: "Problems", icon: CircleAlert },
-] as const satisfies ReadonlyArray<{
-  id: "audit-log" | "problems";
-  label: string;
-  icon: LucideIcon;
-}>;
-
-const rightPanelTabConfig = [
-  { id: "findings", label: "Findings", icon: Shield },
-  { id: "audit-history", label: "Audit History", icon: RefreshCcw },
-] as const satisfies ReadonlyArray<{
-  id: RightPanelTab;
-  label: string;
-  icon: LucideIcon;
-}>;
-
-function WorkbenchTooltip(props: {
-  content?: ReactNode;
-  side?: "top" | "right" | "bottom" | "left";
-  children: ReactNode;
-}) {
-  if (!props.content) {
-    return <>{props.children}</>;
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex">{props.children}</span>
-      </TooltipTrigger>
-      <TooltipContent side={props.side ?? "bottom"}>
-        {props.content}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function RailToggleButton(props: {
-  active: boolean;
-  icon: LucideIcon;
-  ariaLabel: string;
-  title?: string;
-  onClick: () => void;
-}) {
-  const Icon = props.icon;
-
-  return (
-    <WorkbenchTooltip content={props.title}>
-      <Button
-        type="button"
-        size="icon-sm"
-        variant={props.active ? "default" : "ghost"}
-        className={cn(
-          props.active
-            ? "bg-accent text-accent-foreground hover:bg-accent/80"
-            : "text-muted-foreground",
-        )}
-        onClick={props.onClick}
-        aria-label={props.ariaLabel}
-      >
-        <Icon className="size-4" />
-      </Button>
-    </WorkbenchTooltip>
-  );
-}
-
-const DEFAULT_MODEL_ID = "google/gemini-2.5-flash";
-
-function normalizeModelAllowlist(models: string[]): string[] {
-  const uniqueModels: string[] = [];
-  const seenModels = new Set<string>();
-
-  for (const model of models) {
-    const normalized = model.trim();
-    if (!normalized || seenModels.has(normalized)) {
-      continue;
-    }
-    seenModels.add(normalized);
-    uniqueModels.push(normalized);
-  }
-
-  return uniqueModels;
-}
-
-const MonacoEditor = dynamic(
-  async () => {
-    const [monacoReactModule, monacoModule] = await Promise.all([
-      import("@monaco-editor/react"),
-      import("monaco-editor"),
-    ]);
-
-    monacoReactModule.loader.config({ monaco: monacoModule });
-
-    return monacoReactModule.default;
-  },
-  {
-    ssr: false,
-    loading: () => (
-      <div className="text-muted-foreground grid h-full place-items-center text-sm">
-        Loading editor...
-      </div>
-    ),
-  },
-);
-
-const languageMap: Record<string, string> = {
-  tolk: "tolk",
-  func: "func",
-  tact: "tact",
-  fift: "fift",
-  "tl-b": "tl-b",
-  unknown: "plaintext",
-};
-
-const extensionLanguageMap: Record<string, string> = {
-  ".ts": "typescript",
-  ".tsx": "typescript",
-  ".mts": "typescript",
-  ".cts": "typescript",
-  ".js": "javascript",
-  ".jsx": "javascript",
-  ".mjs": "javascript",
-  ".cjs": "javascript",
-  ".md": "markdown",
-  ".markdown": "markdown",
-  ".json": "json",
-  ".xml": "xml",
-};
-
-function getFileExtension(filePath: string | null): string {
-  if (!filePath) {
-    return "";
-  }
-
-  const fileName = filePath.split("/").pop() ?? filePath;
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex < 0) {
-    return "";
-  }
-
-  return fileName.slice(dotIndex).toLowerCase();
-}
-
-function resolveMonacoLanguage(params: {
-  filePath: string | null;
-  language: Language | undefined;
-}): string {
-  const canonicalLanguage = params.language ?? "unknown";
-  if (canonicalLanguage !== "unknown") {
-    return languageMap[canonicalLanguage] ?? "plaintext";
-  }
-
-  const extension = getFileExtension(params.filePath);
-  return extensionLanguageMap[extension] ?? "plaintext";
-}
-
-function treeFiles(nodes: TreeNode[]): string[] {
-  const files: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "file") {
-      files.push(node.path);
-      continue;
-    }
-    files.push(...treeFiles(node.children ?? []));
-  }
-  return files;
-}
-
-function buildTreeFromPaths(paths: string[]): TreeNode[] {
-  type MutableNode = {
-    name: string;
-    path: string;
-    type: "file" | "directory";
-    children: Map<string, MutableNode>;
-  };
-
-  const root = new Map<string, MutableNode>();
-
-  for (const rawPath of paths) {
-    const normalizedPath = normalizePath(rawPath);
-    if (!normalizedPath) {
-      continue;
-    }
-
-    const parts = normalizedPath.split("/").filter(Boolean);
-    if (!parts.length) {
-      continue;
-    }
-
-    let currentChildren = root;
-    let currentPath = "";
-
-    for (let index = 0; index < parts.length; index += 1) {
-      const part = parts[index]!;
-      const isLeaf = index === parts.length - 1;
-      currentPath = currentPath ? `${currentPath}/${part}` : part;
-
-      if (!currentChildren.has(part)) {
-        currentChildren.set(part, {
-          name: part,
-          path: currentPath,
-          type: isLeaf ? "file" : "directory",
-          children: new Map<string, MutableNode>(),
-        });
-      }
-
-      const node = currentChildren.get(part)!;
-      if (!isLeaf) {
-        node.type = "directory";
-        currentChildren = node.children;
-      }
-    }
-  }
-
-  const toNode = (node: MutableNode): TreeNode => {
-    if (node.type === "file") {
-      return {
-        name: node.name,
-        path: node.path,
-        type: "file",
-      };
-    }
-
-    const children = [...node.children.values()].map(toNode).sort((a, b) => {
-      if (a.type !== b.type) {
-        return a.type === "directory" ? -1 : 1;
-      }
-
-      return a.name.localeCompare(b.name);
-    });
-
-    return {
-      name: node.name,
-      path: node.path,
-      type: "directory",
-      children,
-    };
-  };
-
-  return [...root.values()].map(toNode).sort((a, b) => {
-    if (a.type !== b.type) {
-      return a.type === "directory" ? -1 : 1;
-    }
-
-    return a.name.localeCompare(b.name);
-  });
-}
-
-function getFileName(filePath: string) {
-  const parts = filePath.split("/");
-  return parts[parts.length - 1] ?? filePath;
-}
-
-function shortId(value: string | null, size = 8) {
-  if (!value) {
-    return "none";
-  }
-
-  return value.slice(0, size);
-}
-
-function toBullMqJobId(jobId: string) {
-  return jobId.replaceAll(":", "__");
-}
-
-function toAuditStatusLabel(status: string) {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "running":
-      return "Running";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Idle";
-  }
-}
-
-function toPdfStatusLabel(status: string) {
-  switch (status) {
-    case "not_requested":
-      return "Not requested";
-    case "queued":
-      return "Queued";
-    case "running":
-      return "Running";
-    case "completed":
-      return "Ready";
-    case "failed":
-      return "Failed";
-    default:
-      return "Unknown";
-  }
-}
-
-function normalizeSeverity(severity: string) {
-  return severity.trim().toLowerCase();
-}
-
-function toFindingSeverityBucket(
-  severity: string,
-): Exclude<FindingSeverityFilter, "all"> {
-  const normalized = normalizeSeverity(severity);
-  if (
-    normalized === "critical" ||
-    normalized === "high" ||
-    normalized === "medium" ||
-    normalized === "low"
-  ) {
-    return normalized;
-  }
-
-  return "other";
-}
-
-function formatSeverityLabel(severity: string) {
-  const normalized = normalizeSeverity(severity);
-  if (!normalized) {
-    return "Unknown";
-  }
-
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
-
-function severityBadgeClass(severity: string) {
-  switch (normalizeSeverity(severity)) {
-    case "critical":
-      return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300";
-    case "high":
-      return "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-300";
-    case "medium":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    case "low":
-      return "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300";
-    default:
-      return "border-border bg-muted text-muted-foreground";
-  }
-}
-
-function auditStatusBadgeClass(status: string) {
-  switch (status) {
-    case "running":
-      return "border-primary/40 bg-primary/10 text-primary";
-    case "completed":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    case "failed":
-      return "border-destructive/40 bg-destructive/10 text-destructive";
-    case "queued":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    default:
-      return "border-border bg-muted text-muted-foreground";
-  }
-}
-
-function pdfStatusBadgeClass(status: string) {
-  switch (status) {
-    case "completed":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    case "failed":
-      return "border-destructive/40 bg-destructive/10 text-destructive";
-    case "running":
-      return "border-primary/40 bg-primary/10 text-primary";
-    case "queued":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    default:
-      return "border-border bg-muted text-muted-foreground";
-  }
-}
-
-function toProfileLabel(profile: string) {
-  return profile === "fast" ? "FAST" : "DEEP";
-}
-
-function resolveAuditPdfStatus(
-  audit: Pick<AuditHistoryItem, "pdfStatus" | "pdfStatusByVariant">,
-) {
-  return (
-    audit.pdfStatusByVariant?.internal ??
-    audit.pdfStatus ??
-    audit.pdfStatusByVariant?.client ??
-    "not_requested"
-  );
-}
-
-function canExportAuditPdf(auditStatus?: string | null, pdfStatus?: string | null) {
-  return auditStatus === "completed" || pdfStatus === "completed";
-}
-
-function workbenchLogLevelClass(level: WorkbenchLogLevel) {
-  switch (level) {
-    case "error":
-      return "text-destructive";
-    case "warn":
-      return "text-foreground";
-    default:
-      return "text-muted-foreground";
-  }
-}
-
-function createIdleVerifyProgress(): VerifyProgressState {
-  return {
-    phase: "idle",
-    totalSteps: 0,
-    currentStepId: null,
-    toolchain: null,
-    sandboxAdapter: null,
-    mode: null,
-    steps: [],
-  };
-}
-
-function normalizeAuditProfile(value: unknown): AuditProfile | null {
-  return value === "fast" || value === "deep" ? value : null;
-}
-
-function createAuditPipelineStageMap(
-  profile: AuditProfile | null = null,
-): Record<AuditPipelineStageId, AuditPipelineStageState> {
-  const stages = {} as Record<AuditPipelineStageId, AuditPipelineStageState>;
-
-  for (const definition of auditPipelineStageDefinitions) {
-    const isFastValidationSkip =
-      definition.id === "agent-validation" && profile === "fast";
-    stages[definition.id] = {
-      status: isFastValidationSkip ? "skipped" : "pending",
-      detail: isFastValidationSkip ? "Skipped for Fast profile." : null,
-      updatedAt: null,
-    };
-  }
-
-  return stages;
-}
-
-function createIdleAuditPipeline(profile: AuditProfile | null = null): AuditPipelineState {
-  return {
-    profile,
-    status: "idle",
-    currentStageId: null,
-    stages: createAuditPipelineStageMap(profile),
-  };
-}
-
-function createQueuedAuditPipeline(profile: AuditProfile): AuditPipelineState {
-  return {
-    ...createIdleAuditPipeline(profile),
-    status: "queued",
-  };
-}
-
-function withAuditPipelineProfile(
-  current: AuditPipelineState,
-  profile: AuditProfile | null,
-): AuditPipelineState {
-  if (!profile || current.profile === profile) {
-    return current;
-  }
-
-  const nextStages = { ...current.stages };
-  const validationStage = nextStages["agent-validation"];
-  nextStages["agent-validation"] = {
-    ...validationStage,
-    status:
-      profile === "fast"
-        ? validationStage.status === "completed"
-          ? "completed"
-          : "skipped"
-        : validationStage.status === "skipped"
-          ? "pending"
-          : validationStage.status,
-    detail:
-      profile === "fast"
-        ? validationStage.status === "completed"
-          ? validationStage.detail
-          : "Skipped for Fast profile."
-        : validationStage.status === "skipped"
-          ? null
-          : validationStage.detail,
-    updatedAt: Date.now(),
-  };
-
-  return {
-    ...current,
-    profile,
-    stages: nextStages,
-  };
-}
-
-function updateAuditPipelineStage(
-  current: AuditPipelineState,
-  params: {
-    stageId: AuditPipelineStageId;
-    status: AuditPipelineStageStatus;
-    detail?: string | null;
-    makeCurrent?: boolean;
-  },
-): AuditPipelineState {
-  const makeCurrent = params.makeCurrent ?? params.status === "running";
-  const now = Date.now();
-  const nextStages = { ...current.stages };
-
-  if (
-    makeCurrent &&
-    current.currentStageId &&
-    current.currentStageId !== params.stageId
-  ) {
-    const previousStage = nextStages[current.currentStageId];
-    if (previousStage.status === "running") {
-      nextStages[current.currentStageId] = {
-        ...previousStage,
-        status: "completed",
-        updatedAt: now,
-      };
-    }
-  }
-
-  const stage = nextStages[params.stageId];
-  nextStages[params.stageId] = {
-    ...stage,
-    status: params.status,
-    detail: params.detail ?? stage.detail,
-    updatedAt: now,
-  };
-
-  const nextStatus =
-    current.status === "idle" || current.status === "queued"
-      ? "running"
-      : current.status;
-  const nextCurrentStageId = makeCurrent
-    ? params.stageId
-    : current.currentStageId === params.stageId && params.status !== "running"
-      ? null
-      : current.currentStageId;
-
-  return {
-    ...current,
-    status: nextStatus,
-    currentStageId: nextCurrentStageId,
-    stages: nextStages,
-  };
-}
-
-function finalizeAuditPipeline(
-  current: AuditPipelineState,
-  status: "completed" | "failed",
-  failureDetail?: string,
-): AuditPipelineState {
-  const now = Date.now();
-  const nextStages = { ...current.stages };
-
-  if (status === "failed") {
-    if (current.currentStageId) {
-      const activeStage = nextStages[current.currentStageId];
-      nextStages[current.currentStageId] = {
-        ...activeStage,
-        status: "failed",
-        detail: failureDetail ?? activeStage.detail,
-        updatedAt: now,
-      };
-    }
-
-    return {
-      ...current,
-      status,
-      currentStageId: null,
-      stages: nextStages,
-    };
-  }
-
-  for (const definition of auditPipelineStageDefinitions) {
-    const stage = nextStages[definition.id];
-    if (stage.status === "running") {
-      nextStages[definition.id] = {
-        ...stage,
-        status: "completed",
-        updatedAt: now,
-      };
-      continue;
-    }
-
-    if (stage.status !== "pending") {
-      continue;
-    }
-
-    const shouldSkipValidation =
-      definition.id === "agent-validation" && current.profile === "fast";
-    const defaultStatus =
-      definition.id === "quality-gate"
-        ? "completed"
-        : shouldSkipValidation
-          ? "skipped"
-          : "skipped";
-    nextStages[definition.id] = {
-      ...stage,
-      status: defaultStatus,
-      detail:
-        definition.id === "quality-gate"
-          ? stage.detail ?? "Quality gates passed."
-          : shouldSkipValidation
-            ? "Skipped for Fast profile."
-            : stage.detail,
-      updatedAt: now,
-    };
-  }
-
-  return {
-    ...current,
-    status,
-    currentStageId: null,
-    stages: nextStages,
-  };
-}
-
-function auditPipelineStageStatusClass(status: AuditPipelineStageStatus) {
-  switch (status) {
-    case "running":
-      return "border-primary/40 bg-primary/10 text-primary";
-    case "completed":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    case "failed":
-      return "border-destructive/40 bg-destructive/10 text-destructive";
-    case "skipped":
-      return "border-border bg-muted text-muted-foreground";
-    default:
-      return "border-border bg-background text-muted-foreground";
-  }
-}
-
-function toAuditPipelineStageStatusLabel(status: AuditPipelineStageStatus) {
-  switch (status) {
-    case "running":
-      return "Running";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "skipped":
-      return "Skipped";
-    default:
-      return "Pending";
-  }
-}
-
-function toAuditPipelineStatusLabel(status: AuditPipelineStatus) {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "running":
-      return "Running";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    default:
-      return "Idle";
-  }
-}
-
-function isVerifyProgressStepStatus(
-  value: unknown,
-): value is VerifyProgressStepStatus {
-  return (
-    value === "pending" ||
-    value === "running" ||
-    value === "completed" ||
-    value === "failed" ||
-    value === "skipped" ||
-    value === "timeout"
-  );
-}
-
-function parseVerifyProgressStep(
-  raw: unknown,
-  fallbackId: string,
-): VerifyProgressStep | null {
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-
-  const payload = raw as Record<string, unknown>;
-  const id =
-    typeof payload.id === "string" && payload.id.trim()
-      ? payload.id.trim()
-      : fallbackId;
-  const action =
-    typeof payload.action === "string" && payload.action.trim()
-      ? payload.action.trim()
-      : id;
-  const status = isVerifyProgressStepStatus(payload.status)
-    ? payload.status
-    : "pending";
-  const optional = Boolean(payload.optional);
-  const timeoutMs =
-    typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs)
-      ? Math.max(0, Math.trunc(payload.timeoutMs))
-      : 0;
-  const durationMs =
-    typeof payload.durationMs === "number" &&
-    Number.isFinite(payload.durationMs)
-      ? Math.max(0, Math.trunc(payload.durationMs))
-      : null;
-
-  return {
-    id,
-    action,
-    status,
-    optional,
-    timeoutMs,
-    durationMs,
-  };
-}
-
-function parseVerifyProgressSteps(raw: unknown): VerifyProgressStep[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .map((item, index) => parseVerifyProgressStep(item, `step-${index + 1}`))
-    .filter((step): step is VerifyProgressStep => Boolean(step));
-}
-
-function summarizeVerifyProgress(steps: VerifyProgressStep[]) {
-  return {
-    completed: steps.filter((step) => step.status === "completed").length,
-    failed: steps.filter((step) => step.status === "failed").length,
-    skipped: steps.filter((step) => step.status === "skipped").length,
-    timeout: steps.filter((step) => step.status === "timeout").length,
-  };
-}
-
-function verifyStepStatusClass(status: VerifyProgressStepStatus) {
-  switch (status) {
-    case "failed":
-    case "timeout":
-      return "text-destructive";
-    case "running":
-      return "text-primary";
-    case "completed":
-      return "text-foreground";
-    case "skipped":
-      return "text-muted-foreground";
-    default:
-      return "text-muted-foreground";
-  }
-}
-
-function verifyProgressPhaseLabel(phase: VerifyProgressPhase) {
-  switch (phase) {
-    case "security-scan":
-      return "Security Scan";
-    case "plan-ready":
-      return "Plan Ready";
-    case "sandbox-running":
-      return "Sandbox Running";
-    case "sandbox-completed":
-      return "Sandbox Completed";
-    case "sandbox-failed":
-      return "Sandbox Failed";
-    case "sandbox-skipped":
-      return "Sandbox Skipped";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    default:
-      return "Idle";
-  }
-}
-
-function resolveLspWebSocketUrl(rawUrl?: string) {
-  const fallback = "ws://localhost:3002";
-  const configuredUrl = rawUrl?.trim() || fallback;
-
-  if (typeof window === "undefined") {
-    return configuredUrl;
-  }
-
-  try {
-    const parsed = new URL(configuredUrl);
-
-    if (window.location.protocol === "https:" && parsed.protocol === "ws:") {
-      parsed.protocol = "wss:";
-    }
-
-    return parsed.toString();
-  } catch {
-    return configuredUrl;
-  }
-}
-
-function buildLspWebSocketUrls(rawUrl?: string) {
-  const primary = resolveLspWebSocketUrl(rawUrl);
-  const candidates = [primary];
-
-  try {
-    const parsed = new URL(primary);
-    if (parsed.hostname === "localhost") {
-      const fallback = new URL(primary);
-      fallback.hostname = "127.0.0.1";
-      candidates.push(fallback.toString());
-    } else if (parsed.hostname === "127.0.0.1") {
-      const fallback = new URL(primary);
-      fallback.hostname = "localhost";
-      candidates.push(fallback.toString());
-    }
-
-    if (typeof window !== "undefined") {
-      const browserHost = window.location.hostname.trim().toLowerCase();
-      const isLoopbackHost =
-        parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-      const browserIsLoopback =
-        browserHost === "localhost" || browserHost === "127.0.0.1";
-
-      if (isLoopbackHost && browserHost && !browserIsLoopback) {
-        const browserHostCandidate = new URL(primary);
-        browserHostCandidate.hostname = browserHost;
-        candidates.push(browserHostCandidate.toString());
-      }
-    }
-  } catch {
-    // Keep primary URL only when parsing fails.
-  }
-
-  return [...new Set(candidates)];
-}
-
-function collectDirectoryPaths(nodes: TreeNode[]): string[] {
-  const paths: string[] = [];
-
-  for (const node of nodes) {
-    if (node.type !== "directory") {
-      continue;
-    }
-
-    paths.push(node.path);
-    paths.push(...collectDirectoryPaths(node.children ?? []));
-  }
-
-  return paths;
-}
-
-function getParentDirectories(filePath: string): string[] {
-  const normalized = normalizePath(filePath);
-  if (!normalized) {
-    return [];
-  }
-
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 1) {
-    return [];
-  }
-
-  const directories: string[] = [];
-  for (let index = 1; index < parts.length; index += 1) {
-    directories.push(parts.slice(0, index).join("/"));
-  }
-
-  return directories;
-}
-
-function TreeView(props: {
-  nodes: TreeNode[];
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  expandedDirectories: Set<string>;
-  onToggleDirectory: (path: string) => void;
-  onContextNode?: (node: { path: string; type: "file" | "directory" }) => void;
-  parentPath?: string | null;
-  inlineNewFileDraft?: {
-    parentPath: string | null;
-    value: string;
-    isBusy: boolean;
-    rowRef: {
-      current: HTMLDivElement | null;
-    };
-    inputRef: {
-      current: HTMLInputElement | null;
-    };
-    onChange: (value: string) => void;
-    onSubmit: () => void;
-    onCancel: () => void;
-  } | null;
-  depth?: number;
-}) {
-  const {
-    nodes,
-    selectedPath,
-    onSelect,
-    expandedDirectories = new Set<string>(),
-    onToggleDirectory = () => undefined,
-    onContextNode = () => undefined,
-    parentPath = null,
-    inlineNewFileDraft = null,
-    depth = 0,
-  } = props;
-  const shouldRenderInlineNewFile = Boolean(
-    inlineNewFileDraft && inlineNewFileDraft.parentPath === parentPath,
-  );
-
-  return (
-    <ul className="space-y-0.5 text-xs">
-      {shouldRenderInlineNewFile && inlineNewFileDraft ? (
-        <li key={`new-file-${parentPath ?? "root"}`}>
-          <div
-            ref={inlineNewFileDraft.rowRef}
-            className="flex h-6 w-full items-center gap-1 rounded px-1 text-left text-xs"
-            style={{ paddingLeft: `${depth * 12 + 22}px` }}
-          >
-            <FileCode2 className="text-muted-foreground size-3" />
-            <Input
-              ref={inlineNewFileDraft.inputRef}
-              value={inlineNewFileDraft.value}
-              onChange={(event) =>
-                inlineNewFileDraft.onChange(event.target.value)
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  inlineNewFileDraft.onSubmit();
-                  return;
-                }
-
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  inlineNewFileDraft.onCancel();
-                }
-              }}
-              className="h-5 rounded-sm px-1 text-xs"
-              placeholder="new-file.tolk"
-              disabled={inlineNewFileDraft.isBusy}
-              aria-label="New file name"
-            />
-          </div>
-        </li>
-      ) : null}
-      {nodes.map((node) => {
-        if (node.type === "directory") {
-          const expanded = expandedDirectories.has(node.path);
-          return (
-            <li key={node.path}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => onToggleDirectory(node.path)}
-                onContextMenu={() => {
-                  onContextNode({ path: node.path, type: "directory" });
-                }}
-                className="h-6 w-full justify-start gap-1 rounded px-1 text-left text-xs"
-                style={{ paddingLeft: `${depth * 12 + 4}px` }}
-              >
-                {expanded ? (
-                  <ChevronDown className="size-3" />
-                ) : (
-                  <ChevronRight className="size-3" />
-                )}
-                {expanded ? (
-                  <FolderOpen className="size-3.5" />
-                ) : (
-                  <Folder className="size-3.5" />
-                )}
-                <span className="truncate">{node.name}</span>
-              </Button>
-              {expanded ? (
-                <TreeView
-                  nodes={node.children ?? []}
-                  selectedPath={selectedPath}
-                  onSelect={onSelect}
-                  expandedDirectories={expandedDirectories}
-                  onToggleDirectory={onToggleDirectory}
-                  onContextNode={onContextNode}
-                  parentPath={node.path}
-                  inlineNewFileDraft={inlineNewFileDraft}
-                  depth={depth + 1}
-                />
-              ) : null}
-            </li>
-          );
-        }
-
-        return (
-          <li key={node.path}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onSelect(node.path)}
-              onContextMenu={() => {
-                onContextNode({ path: node.path, type: "file" });
-              }}
-              className={cn(
-                "h-6 w-full justify-start gap-1 rounded px-1 text-left text-xs",
-                selectedPath === node.path
-                  ? "bg-accent text-accent-foreground"
-                  : "text-foreground hover:bg-accent/60",
-              )}
-              style={{ paddingLeft: `${depth * 12 + 22}px` }}
-            >
-              <FileCode2 className="size-3" />
-              <span className="truncate">{node.name}</span>
-            </Button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+import {
+  auditPipelineStageDefinitions,
+  DEFAULT_MODEL_ID,
+  DEFAULT_NEW_FILE_NAME,
+  bottomPanelTabConfig,
+  rightPanelTabConfig,
+} from "@/components/workbench/ton-workbench.constants";
+import {
+  auditPipelineStageStatusClass,
+  auditStatusBadgeClass,
+  buildLspWebSocketUrls,
+  buildTreeFromPaths,
+  canExportAuditPdf,
+  collectDirectoryPaths,
+  createIdleAuditPipeline,
+  createIdleVerifyProgress,
+  createQueuedAuditPipeline,
+  finalizeAuditPipeline,
+  formatSeverityLabel,
+  getFileName,
+  getParentDirectories,
+  isFindingSeverityFilter,
+  normalizeAuditProfile,
+  normalizeModelAllowlist,
+  parseVerifyProgressStep,
+  parseVerifyProgressSteps,
+  pdfStatusBadgeClass,
+  resolveAuditPdfStatus,
+  resolveMonacoLanguage,
+  severityBadgeClass,
+  shortId,
+  summarizeVerifyProgress,
+  toAuditPipelineStageStatusLabel,
+  toAuditPipelineStatusLabel,
+  toAuditStatusLabel,
+  toBullMqJobId,
+  toFindingSeverityBucket,
+  toPdfStatusLabel,
+  toProfileLabel,
+  treeFiles,
+  updateAuditPipelineStage,
+  verifyProgressPhaseLabel,
+  verifyStepStatusClass,
+  withAuditPipelineProfile,
+  workbenchLogLevelClass,
+} from "@/components/workbench/ton-workbench.utils";
+import { MonacoEditor } from "@/components/workbench/workbench-monaco-editor";
+import { RailToggleButton } from "@/components/workbench/workbench-rail-toggle-button";
+import { TreeView } from "@/components/workbench/workbench-tree-view";
+import type {
+  AuditCompareResponse,
+  AuditFindingInstance,
+  AuditHistoryItem,
+  AuditPipelineStageId,
+  AuditPipelineState,
+  AuditPipelineStatus,
+  AuditProfile,
+  BackendJobEvent,
+  ExplorerActionConfig,
+  FindingSeverityFilter,
+  RailToggleConfig,
+  RightPanelTab,
+  TonWorkbenchProps,
+  TreeNode,
+  VerifyProgressPhase,
+  VerifyProgressState,
+  WorkbenchFileEntry,
+  WorkbenchLogEntry,
+  WorkbenchLogLevel,
+} from "@/components/workbench/ton-workbench.types";
 
 export function TonWorkbench(props: TonWorkbenchProps) {
   const {
@@ -1467,7 +221,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   );
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
   const [isInlineNewFile, setIsInlineNewFile] = useState(false);
-  const [inlineNewFileName, setInlineNewFileName] = useState("new-module.tolk");
+  const [inlineNewFileName, setInlineNewFileName] = useState(
+    DEFAULT_NEW_FILE_NAME,
+  );
   const [inlineNewFileParentPath, setInlineNewFileParentPath] = useState<
     string | null
   >(null);
@@ -3157,16 +1913,18 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [auditProfile, fallbackModelId, modelStorageKey, primaryModelId]);
 
   useEffect(() => {
+    const currentSources = eventSourcesRef.current;
+
     return () => {
       if (lspClientRef.current) {
         void lspClientRef.current.dispose();
         lspClientRef.current = null;
       }
 
-      for (const source of eventSourcesRef.current.values()) {
+      for (const source of currentSources.values()) {
         source.close();
       }
-      eventSourcesRef.current.clear();
+      currentSources.clear();
     };
   }, []);
 
@@ -3199,7 +1957,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       setIsInlineNewFile(false);
-      setInlineNewFileName("new-module.tolk");
+      setInlineNewFileName(DEFAULT_NEW_FILE_NAME);
       setInlineNewFileParentPath(null);
     };
 
@@ -3832,7 +2590,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         buildTreeFromPaths([...new Set([...treeFiles(current), normalized])]),
       );
       openFileInEditor(normalized);
-      setInlineNewFileName("new-module.tolk");
+      setInlineNewFileName(DEFAULT_NEW_FILE_NAME);
       setInlineNewFileParentPath(null);
       setIsInlineNewFile(false);
     } catch (error) {
@@ -3859,7 +2617,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       parentPath === undefined ? selectedParentPath : parentPath;
 
     setInlineNewFileParentPath(targetParentPath);
-    setInlineNewFileName("new-module.tolk");
+    setInlineNewFileName(DEFAULT_NEW_FILE_NAME);
     setExplorerQuery("");
     setIsInlineNewFile(true);
 
@@ -3878,7 +2636,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
   function cancelInlineNewFile() {
     setIsInlineNewFile(false);
-    setInlineNewFileName("new-module.tolk");
+    setInlineNewFileName(DEFAULT_NEW_FILE_NAME);
     setInlineNewFileParentPath(null);
   }
 
@@ -4574,14 +3332,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                     filteredFindings={filteredFindings}
                     onFindingsQueryChange={setFindingsQuery}
                     onFindingsSeverityFilterChange={(value) => {
-                      if (
-                        value === "all" ||
-                        value === "critical" ||
-                        value === "high" ||
-                        value === "medium" ||
-                        value === "low" ||
-                        value === "other"
-                      ) {
+                      if (isFindingSeverityFilter(value)) {
                         setFindingsSeverityFilter(value);
                       }
                     }}
@@ -4907,3 +3658,4 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     </TooltipProvider>
   );
 }
+
