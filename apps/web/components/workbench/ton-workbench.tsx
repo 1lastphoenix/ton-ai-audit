@@ -94,6 +94,8 @@ import {
   resolveMonacoTheme,
   type WorkbenchTreeNode,
 } from "@/components/workbench/workbench-ui-utils";
+import { WorkbenchExecutionTracker } from "@/components/workbench/workbench-execution-tracker";
+import { WorkbenchAuditHistoryList } from "@/components/workbench/workbench-audit-history-list";
 
 type TreeNode = WorkbenchTreeNode;
 
@@ -1621,9 +1623,32 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           ? "running"
           : auditStatus === "failed"
             ? "failed"
-            : auditStatus === "completed"
+          : auditStatus === "completed"
               ? "completed"
               : "idle";
+  const executionTrackerProfileLabel = auditPipeline.profile
+    ? toProfileLabel(auditPipeline.profile)
+    : null;
+  const executionTrackerActiveLabel =
+    verifyProgressCurrentStep?.id ?? auditPipelineCurrentStage?.label ?? null;
+  const executionTrackerStageRows = useMemo(
+    () =>
+      auditPipelineStages.map((stage) => ({
+        ...stage,
+        isCurrent: auditPipeline.currentStageId === stage.id,
+      })),
+    [auditPipeline.currentStageId, auditPipelineStages],
+  );
+  const executionTrackerVerifyRows = useMemo(
+    () =>
+      verifyProgress.steps.map((step) => ({
+        ...step,
+        isCurrent: verifyProgressCurrentStep?.id === step.id,
+      })),
+    [verifyProgress.steps, verifyProgressCurrentStep?.id],
+  );
+  const executionTrackerVerifyFailed =
+    verifyProgress.phase === "failed" || verifyProgress.phase === "sandbox-failed";
   const filteredTree = useMemo(
     () => filterWorkbenchTree(tree, explorerQuery),
     [tree, explorerQuery],
@@ -4369,24 +4394,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                     </Button>
                   </WorkbenchTooltip>
 
-                  <Select
-                    value={auditProfile}
-                    onValueChange={(value) => {
-                      if (value === "fast" || value === "deep") {
-                        setAuditProfile(value);
-                      }
-                    }}
-                    disabled={isAuditWriteLocked || isBusy}
-                  >
-                    <SelectTrigger className="h-6 w-[80px] rounded-sm px-2 text-[10px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="deep">Deep</SelectItem>
-                      <SelectItem value="fast">Fast</SelectItem>
-                    </SelectContent>
-                  </Select>
-
                   <WorkbenchTooltip
                     content={`Run ${toProfileLabel(auditProfile)} Audit`}
                   >
@@ -4622,225 +4629,27 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 <div className="h-56">
                   {bottomPanelTab === "audit-log" ? (
                     <ScrollArea className="h-full px-2 py-2">
-                      {shouldShowExecutionTracker ? (
-                        <div className="bg-background/70 mb-2 rounded border border-border p-2">
-                          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                            <span className="text-foreground font-semibold">
-                              Execution Tracker
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "h-4 border px-1.5 text-[10px] font-medium",
-                                auditStatusBadgeClass(executionTrackerStatus),
-                              )}
-                            >
-                              {toAuditPipelineStatusLabel(executionTrackerStatus)}
-                            </Badge>
-                            {auditPipeline.profile ? (
-                              <Badge
-                                variant="outline"
-                                className="h-4 border px-1.5 text-[10px] font-medium"
-                              >
-                                {toProfileLabel(auditPipeline.profile)}
-                              </Badge>
-                            ) : null}
-                            <span className="text-muted-foreground ml-auto">
-                              {auditPipelineResolvedStages}/
-                              {auditPipelineTotalStages} stages
-                            </span>
-                          </div>
-
-                          <div className="bg-muted mt-1 h-1.5 overflow-hidden rounded">
-                            <div
-                              className={cn(
-                                "h-full rounded transition-[width]",
-                                executionTrackerStatus === "failed"
-                                  ? "bg-destructive"
-                                  : "bg-primary",
-                              )}
-                              style={{ width: `${auditPipelinePercent}%` }}
-                            />
-                          </div>
-
-                          <div className="mt-2 overflow-x-auto rounded border border-border/70">
-                            <table className="w-full min-w-[640px] text-[11px]">
-                              <thead className="bg-muted/40 text-muted-foreground">
-                                <tr>
-                                  <th className="px-2 py-1 text-left font-medium">
-                                    Stage
-                                  </th>
-                                  <th className="px-2 py-1 text-left font-medium">
-                                    Status
-                                  </th>
-                                  <th className="px-2 py-1 text-left font-medium">
-                                    Details
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {auditPipelineStages.map((stage) => (
-                                  <tr
-                                    key={stage.id}
-                                    className={cn(
-                                      "border-t border-border/60",
-                                      auditPipeline.currentStageId === stage.id
-                                        ? "bg-primary/5"
-                                        : "",
-                                    )}
-                                  >
-                                    <td className="text-foreground px-2 py-1.5 font-medium">
-                                      {stage.label}
-                                    </td>
-                                    <td className="px-2 py-1.5">
-                                      <span
-                                        className={cn(
-                                          "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium",
-                                          auditPipelineStageStatusClass(
-                                            stage.status,
-                                          ),
-                                        )}
-                                      >
-                                        {toAuditPipelineStageStatusLabel(
-                                          stage.status,
-                                        )}
-                                      </span>
-                                    </td>
-                                    <td className="text-muted-foreground px-2 py-1.5">
-                                      {stage.detail ??
-                                        (auditPipeline.currentStageId === stage.id
-                                          ? "Running..."
-                                          : stage.description)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-
-                          <div className="mt-2 rounded border border-border/70">
-                            <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-2 py-1.5 text-[11px]">
-                              <span className="text-foreground font-medium">
-                                Verification Steps
-                              </span>
-                              <span className="text-muted-foreground">
-                                {verifyProgressPhaseLabel(verifyProgress.phase)}
-                              </span>
-                              <span className="text-muted-foreground">
-                                {verifyProgressResolvedSteps}/
-                                {verifyProgressTotalSteps || 0}
-                              </span>
-                              {verifyProgressCurrentStep ? (
-                                <span className="text-muted-foreground ml-auto max-w-[240px] truncate">
-                                  Active: {verifyProgressCurrentStep.id}
-                                </span>
-                              ) : auditPipelineCurrentStage ? (
-                                <span className="text-muted-foreground ml-auto max-w-[240px] truncate">
-                                  Active: {auditPipelineCurrentStage.label}
-                                </span>
-                              ) : null}
-                            </div>
-
-                            {verifyProgressTotalSteps > 0 ? (
-                              <div className="bg-muted h-1.5 overflow-hidden">
-                                <div
-                                  className={cn(
-                                    "h-full transition-[width]",
-                                    verifyProgress.phase === "failed" ||
-                                      verifyProgress.phase === "sandbox-failed"
-                                      ? "bg-destructive"
-                                      : "bg-primary",
-                                  )}
-                                  style={{ width: `${verifyProgressPercent}%` }}
-                                />
-                              </div>
-                            ) : null}
-
-                            <div className="overflow-x-auto">
-                              <table className="w-full min-w-[720px] text-[11px]">
-                                <thead className="bg-muted/20 text-muted-foreground">
-                                  <tr>
-                                    <th className="w-12 px-2 py-1 text-left font-medium">
-                                      #
-                                    </th>
-                                    <th className="px-2 py-1 text-left font-medium">
-                                      Step
-                                    </th>
-                                    <th className="px-2 py-1 text-left font-medium">
-                                      Action
-                                    </th>
-                                    <th className="px-2 py-1 text-left font-medium">
-                                      Status
-                                    </th>
-                                    <th className="px-2 py-1 text-left font-medium">
-                                      Duration
-                                    </th>
-                                    <th className="px-2 py-1 text-left font-medium">
-                                      Type
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {verifyProgress.steps.length ? (
-                                    verifyProgress.steps.map((step, index) => (
-                                      <tr
-                                        key={step.id}
-                                        className={cn(
-                                          "border-t border-border/60",
-                                          verifyProgressCurrentStep?.id === step.id
-                                            ? "bg-primary/5"
-                                            : "",
-                                        )}
-                                      >
-                                        <td className="text-muted-foreground px-2 py-1.5">
-                                          {index + 1}
-                                        </td>
-                                        <td className="text-foreground px-2 py-1.5 font-medium">
-                                          {step.id}
-                                        </td>
-                                        <td className="text-muted-foreground px-2 py-1.5">
-                                          <WorkbenchTooltip content={step.action}>
-                                            <span className="inline-block max-w-[300px] truncate align-middle">
-                                              {step.action}
-                                            </span>
-                                          </WorkbenchTooltip>
-                                        </td>
-                                        <td className="px-2 py-1.5">
-                                          <span
-                                            className={cn(
-                                              "inline-flex rounded border border-border px-1.5 py-0.5 uppercase",
-                                              verifyStepStatusClass(step.status),
-                                            )}
-                                          >
-                                            {step.status}
-                                          </span>
-                                        </td>
-                                        <td className="text-muted-foreground px-2 py-1.5">
-                                          {step.durationMs !== null
-                                            ? `${(step.durationMs / 1000).toFixed(1)}s`
-                                            : "n/a"}
-                                        </td>
-                                        <td className="text-muted-foreground px-2 py-1.5">
-                                          {step.optional ? "Optional" : "Required"}
-                                        </td>
-                                      </tr>
-                                    ))
-                                  ) : (
-                                    <tr className="border-t border-border/60">
-                                      <td
-                                        colSpan={6}
-                                        className="text-muted-foreground px-2 py-2"
-                                      >
-                                        No sandbox step events yet.
-                                      </td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
+                      <WorkbenchExecutionTracker
+                        visible={shouldShowExecutionTracker}
+                        statusLabel={toAuditPipelineStatusLabel(executionTrackerStatus)}
+                        statusClassName={auditStatusBadgeClass(executionTrackerStatus)}
+                        profileLabel={executionTrackerProfileLabel}
+                        resolvedStages={auditPipelineResolvedStages}
+                        totalStages={auditPipelineTotalStages}
+                        stagePercent={auditPipelinePercent}
+                        stageFailed={executionTrackerStatus === "failed"}
+                        stages={executionTrackerStageRows}
+                        stageStatusClass={auditPipelineStageStatusClass}
+                        stageStatusLabel={toAuditPipelineStageStatusLabel}
+                        verifyPhaseLabel={verifyProgressPhaseLabel(verifyProgress.phase)}
+                        verifyResolvedSteps={verifyProgressResolvedSteps}
+                        verifyTotalSteps={verifyProgressTotalSteps}
+                        verifyPercent={verifyProgressPercent}
+                        verifyFailed={executionTrackerVerifyFailed}
+                        activeLabel={executionTrackerActiveLabel}
+                        verifySteps={executionTrackerVerifyRows}
+                        verifyStepStatusClass={verifyStepStatusClass}
+                      />
 
                       {activityFeed.length ? (
                         <div className="space-y-1.5">
@@ -5383,98 +5192,23 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                             No audits yet for this project.
                           </div>
                         ) : (
-                          <div className="space-y-2 [content-visibility:auto]">
-                            {auditHistory.map((item) => (
-                              <div
-                                key={item.id}
-                                className={cn(
-                                  "bg-card rounded-md border border-border px-2.5 py-2",
-                                  item.id === auditId
-                                    ? "border-primary/50 shadow-sm"
-                                    : "",
-                                )}
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="text-foreground truncate text-xs font-medium">
-                                      audit {shortId(item.id)} · rev{" "}
-                                      {shortId(item.revisionId)}
-                                    </div>
-                                    <div className="text-muted-foreground text-[11px]">
-                                      {new Date(item.createdAt).toLocaleString()}
-                                    </div>
-                                  </div>
-                                  <div className="flex shrink-0 flex-col items-end gap-1">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "h-5 border px-1.5 text-[10px] font-medium",
-                                        auditStatusBadgeClass(item.status),
-                                      )}
-                                    >
-                                      {toAuditStatusLabel(item.status)}
-                                    </Badge>
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "h-5 border px-1.5 text-[10px] font-medium",
-                                        pdfStatusBadgeClass(resolveAuditPdfStatus(item)),
-                                      )}
-                                    >
-                                      PDF {toPdfStatusLabel(resolveAuditPdfStatus(item))}
-                                    </Badge>
-                                  </div>
-                                </div>
-                                <div className="text-muted-foreground mt-1.5 text-[11px]">
-                                  findings {item.findingCount} · {item.primaryModelId}
-                                </div>
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                    {toProfileLabel(item.profile ?? "deep")}
-                                  </Badge>
-                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                    {item.engineVersion ?? "legacy-engine"}
-                                  </Badge>
-                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                    schema v{item.reportSchemaVersion ?? 1}
-                                  </Badge>
-                                </div>
-                                <div className="mt-2 flex items-center gap-1.5">
-                                  {item.id !== auditId ? (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 px-2 text-[11px]"
-                                      onClick={() => {
-                                        viewAuditFromHistory(item);
-                                      }}
-                                    >
-                                      View
-                                    </Button>
-                                  ) : null}
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 px-2 text-[11px]"
-                                    disabled={
-                                      !canExportAuditPdf(
-                                        item.status,
-                                        resolveAuditPdfStatus(item),
-                                      ) ||
-                                      isBusy
-                                    }
-                                    onClick={() => {
-                                      void exportPdfForAudit(item.id);
-                                    }}
-                                  >
-                                    Final PDF
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+                          <WorkbenchAuditHistoryList
+                            items={auditHistory}
+                            selectedAuditId={auditId}
+                            isBusy={isBusy}
+                            shortId={shortId}
+                            toAuditStatusLabel={toAuditStatusLabel}
+                            auditStatusBadgeClass={auditStatusBadgeClass}
+                            toPdfStatusLabel={toPdfStatusLabel}
+                            pdfStatusBadgeClass={pdfStatusBadgeClass}
+                            toProfileLabel={toProfileLabel}
+                            getPdfStatus={resolveAuditPdfStatus}
+                            canExportPdf={canExportAuditPdf}
+                            onViewAudit={viewAuditFromHistory}
+                            onExportPdf={(targetAuditId) => {
+                              void exportPdfForAudit(targetAuditId);
+                            }}
+                          />
                         )}
                       </div>
                       {lastError ? (

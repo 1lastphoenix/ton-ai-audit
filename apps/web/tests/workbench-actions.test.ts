@@ -84,13 +84,21 @@ describe("ton workbench actions", () => {
 
   it("renders verify per-step progress from SSE verify events", () => {
     const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const trackerPath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-execution-tracker.tsx",
+    );
     const source = fs.readFileSync(filePath, "utf8");
+    const trackerSource = fs.readFileSync(trackerPath, "utf8");
 
     expect(source).toContain("event === \"progress\"");
     expect(source).toContain("event === \"sandbox-step\"");
     expect(source).toContain("verifyProgressPhaseLabel");
-    expect(source).toContain("Execution Tracker");
-    expect(source).toContain("Verification Steps");
+    expect(source).toContain("WorkbenchExecutionTracker");
+    expect(trackerSource).toContain("Execution Tracker");
+    expect(trackerSource).toContain("Verification Steps");
   });
 
   it("tracks audit phase progress in the same execution tracker", () => {
@@ -107,13 +115,38 @@ describe("ton workbench actions", () => {
 
   it("loads audit history, compares completed audits, and exports PDF per selected audit row", () => {
     const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const historyPath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-audit-history-list.tsx",
+    );
     const source = fs.readFileSync(filePath, "utf8");
+    const historySource = fs.readFileSync(historyPath, "utf8");
 
     expect(source).toContain("/api/projects/${projectId}/audits");
     expect(source).toContain("/api/projects/${projectId}/audits/compare?");
     expect(source).toContain("Audit History");
     expect(source).toContain("exportPdfForAudit");
-    expect(source).toContain("void exportPdfForAudit(item.id)");
+    expect(source).toContain("WorkbenchAuditHistoryList");
+    expect(historySource).toContain("Final PDF");
+  });
+
+  it("keeps audit profile selector in context menu only and removes schema/engine chips from cards", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const historyPath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-audit-history-list.tsx",
+    );
+    const source = fs.readFileSync(filePath, "utf8");
+    const historySource = fs.readFileSync(historyPath, "utf8");
+
+    expect(source).toContain("Audit profile (");
+    expect(source).not.toContain("<Select value={auditProfile}");
+    expect(historySource).not.toContain("schema v");
+    expect(historySource).not.toContain("legacy-engine");
   });
 
   it("falls back to Monaco language highlighting for ts/js/md style files", () => {
