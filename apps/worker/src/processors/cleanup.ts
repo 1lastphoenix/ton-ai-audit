@@ -80,9 +80,20 @@ export function createCleanupProcessor() {
       }
 
       for (const audit of staleAudits) {
-        await deleteObject(`audits/${audit.id}/prompt.txt`);
-        await deleteObject(`audits/${audit.id}/model-result.json`);
-        await deleteObject(`audits/${audit.id}/primary-error.json`);
+        const artifactKeys = [
+          "prompt.txt",
+          "model-result.json",
+          "primary-error.json",
+          "agent-step-trace.json",
+          "quality-gates.json",
+          "taxonomy-coverage.json",
+          "normalized-evidence-pack.json",
+          "report-v2.json"
+        ];
+
+        for (const artifactKey of artifactKeys) {
+          await deleteObject(`audits/${audit.id}/${artifactKey}`);
+        }
       }
 
       for (const blob of staleBlobs) {

@@ -418,6 +418,9 @@ export async function createRevisionFromUpload(params: {
   if (!uploadRecord) {
     throw new Error("Upload not found");
   }
+  if (uploadRecord.status !== "uploaded") {
+    throw new Error("Upload is not finalized");
+  }
 
   const [latestRevision] = await db
     .select()

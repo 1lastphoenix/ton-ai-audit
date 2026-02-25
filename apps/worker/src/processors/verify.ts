@@ -262,6 +262,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       .where(eq(auditRuns.id, auditRun.id));
 
     workerLogger.info("verify.stage.audit-run-marked-running", context);
+    const verifyStartedAt = Date.now();
 
     try {
       const files = await loadRevisionFilesWithContent(job.data.revisionId);
@@ -316,6 +317,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       let sandboxResults: Awaited<ReturnType<typeof executeSandboxPlan>>["results"] = [];
       let securityScanArtifacts: SecurityScanArtifact[] = [];
       let securityScanDiagnostics: SecurityScanDiagnostic[] = [];
+      let sandboxExecutionFailed = false;
 
       if (plan.steps.length > 0) {
         const liveProgressSteps = plannedProgressSteps.map((step) => ({
@@ -508,6 +510,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             }
           });
         } catch (sandboxError) {
+          sandboxExecutionFailed = true;
           sandboxExecutionSummary = `Sandbox execution unavailable: ${
             sandboxError instanceof Error ? sandboxError.message : "Unknown error"
           }`;
@@ -574,14 +577,14 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         };
       });
       securityScanDiagnostics = securityScanArtifacts.flatMap((artifact) => artifact.diagnostics);
+      const missingSecurityScans = Math.max(plannedSecurityScans.length - securityScanArtifacts.length, 0);
+      const failedSecurityScans =
+        securityScanArtifacts.filter(
+          (artifact) => artifact.status === "failed" || artifact.status === "timeout"
+        ).length + missingSecurityScans;
 
       if (plannedSecurityScans.length > 0) {
-        const missingScans = Math.max(plannedSecurityScans.length - securityScanArtifacts.length, 0);
         const completedScans = securityScanArtifacts.filter((artifact) => artifact.status === "completed").length;
-        const failedScans =
-          securityScanArtifacts.filter(
-          (artifact) => artifact.status === "failed" || artifact.status === "timeout"
-          ).length + missingScans;
 
         await recordJobEvent({
           projectId: job.data.projectId,
@@ -591,9 +594,9 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           payload: {
             auditRunId: auditRun.id,
             phase: "security-scan",
-            status: failedScans > 0 ? "completed_with_failures" : "completed",
+            status: failedSecurityScans > 0 ? "completed_with_failures" : "completed",
             completedScans,
-            failedScans,
+            failedScans: failedSecurityScans,
             diagnostics: securityScanDiagnostics.length
           }
         });
@@ -672,39 +675,31 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         securityScanKey
       });
 
-      const startedAt = new Date();
-
       await db.insert(verificationSteps).values({
         auditRunId: auditRun.id,
         stepType: "static-verification",
         toolchain,
         status:
           diagnostics.some((item) => item.level === "error") ||
+          sandboxExecutionFailed ||
           sandboxResults.some((item) => item.status === "failed" || item.status === "timeout")
             ? "failed"
             : "completed",
         stdoutKey,
         stderrKey,
         summary: `${diagnostics.length} deterministic diagnostics | ${securityScanDiagnostics.length} security diagnostics | artifacts: ${diagnosticsKey}, ${sandboxKey}, ${securityScanKey}`,
-        durationMs: Math.max(Date.now() - startedAt.getTime(), 1)
+        durationMs: Math.max(Date.now() - verifyStartedAt, 1)
       });
 
       await db.insert(verificationSteps).values({
         auditRunId: auditRun.id,
         stepType: "security-scan",
         toolchain: "sandbox-runner",
-        status:
-          securityScanArtifacts.some(
-            (item) => item.status === "failed" || item.status === "timeout"
-          )
-            ? "failed"
-            : plannedSecurityScans.length > 0
-              ? "completed"
-              : "skipped",
+        status: plannedSecurityScans.length === 0 ? "skipped" : failedSecurityScans > 0 ? "failed" : "completed",
         stdoutKey: securityScanKey,
         stderrKey: securityScanSummaryKey,
-        summary: `${securityScanDiagnostics.length} security diagnostics across ${securityScanArtifacts.length} scan(s)`,
-        durationMs: Math.max(Date.now() - startedAt.getTime(), 1)
+        summary: `${securityScanDiagnostics.length} security diagnostics across ${securityScanArtifacts.length} scan(s); missing scans: ${missingSecurityScans}`,
+        durationMs: Math.max(Date.now() - verifyStartedAt, 1)
       });
 
       workerLogger.info("verify.stage.summary-step-recorded", {

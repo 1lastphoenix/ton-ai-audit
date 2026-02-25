@@ -33,7 +33,11 @@ export async function POST(
     }
 
     if (upload.type === "zip") {
-      if (upload.multipartUploadId && body.eTags.length) {
+      if (upload.multipartUploadId) {
+        if (!body.eTags.length) {
+          return NextResponse.json({ error: "Missing multipart eTags" }, { status: 400 });
+        }
+
         await completeMultipartUpload({
           key: upload.s3Key,
           uploadId: upload.multipartUploadId,
@@ -42,6 +46,11 @@ export async function POST(
             PartNumber: item.partNumber
           }))
         });
+      } else {
+        const exists = await objectExists(upload.s3Key);
+        if (!exists) {
+          return NextResponse.json({ error: "Uploaded object is missing in storage" }, { status: 400 });
+        }
       }
     } else {
       const metadataFiles = Array.isArray((upload.metadata as { files?: unknown[] } | null)?.files)

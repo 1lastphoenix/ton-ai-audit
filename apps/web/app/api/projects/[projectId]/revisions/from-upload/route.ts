@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { createRevisionFromUploadSchema, uploads } from "@ton-audit/shared";
 
@@ -38,16 +38,36 @@ export async function POST(
     }
 
     const body = await parseJsonBody(request, createRevisionFromUploadSchema);
+    const upload = await db.query.uploads.findFirst({
+      where: and(eq(uploads.id, body.uploadId), eq(uploads.projectId, projectId))
+    });
+    if (!upload) {
+      return NextResponse.json({ error: "Upload not found" }, { status: 404 });
+    }
+    if (upload.status !== "uploaded") {
+      return NextResponse.json(
+        { error: "Upload is not finalized yet. Complete the upload first." },
+        { status: 409 }
+      );
+    }
+
     const { revision } = await createRevisionFromUpload({
       projectId,
       uploadId: body.uploadId,
       createdByUserId: session.user.id
     });
 
-    await db
+    const [markedProcessing] = await db
       .update(uploads)
       .set({ status: "processing", updatedAt: new Date() })
-      .where(eq(uploads.id, body.uploadId));
+      .where(and(eq(uploads.id, body.uploadId), eq(uploads.status, "uploaded")))
+      .returning({ id: uploads.id });
+    if (!markedProcessing) {
+      return NextResponse.json(
+        { error: "Upload is not available for processing. Try again." },
+        { status: 409 }
+      );
+    }
 
     const job = await enqueueJob(
       "ingest",

@@ -97,6 +97,16 @@ export function useWorkbenchEvents(params: UseWorkbenchEventsParams) {
     return [...new Set(ids)].slice(-48);
   }, [auditId, isAuditInProgress, projectId, registeredJobIds]);
 
+  const isTerminalJobEvent = useCallback((eventName: string) => {
+    return (
+      eventName === "completed" ||
+      eventName === "worker-completed" ||
+      eventName === "failed" ||
+      eventName === "worker-failed" ||
+      eventName === "timeout"
+    );
+  }, []);
+
   useEffect(() => {
     const currentSources = eventSourcesRef.current;
     const knownIds = new Set(activeJobIds);
@@ -142,6 +152,11 @@ export function useWorkbenchEvents(params: UseWorkbenchEventsParams) {
         setJobState(`${payload.queue}:${payload.event}`);
         lastBackendEventAtRef.current = Date.now();
         staleBackendWarningShownRef.current = false;
+        if (isTerminalJobEvent(payload.event)) {
+          setRegisteredJobIds((current) =>
+            current.filter((registeredId) => registeredId !== jobId),
+          );
+        }
 
         if (payload.queue === "verify") {
           const verifyPayload =
@@ -894,6 +909,7 @@ export function useWorkbenchEvents(params: UseWorkbenchEventsParams) {
     setAuditPipeline,
     setAuditStatus,
     setVerifyProgress,
+    isTerminalJobEvent,
   ]);
 
   useEffect(() => {
