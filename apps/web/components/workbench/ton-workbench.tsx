@@ -574,6 +574,10 @@ function shortId(value: string | null, size = 8) {
   return value.slice(0, size);
 }
 
+function toBullMqJobId(jobId: string) {
+  return jobId.replaceAll(":", "__");
+}
+
 function toAuditStatusLabel(status: string) {
   switch (status) {
     case "queued":
@@ -1385,7 +1389,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const registerJobIds = useCallback(
     (jobIds: Array<string | null | undefined>) => {
       const normalized = jobIds
-        .map((item) => (item ? String(item).trim() : ""))
+        .map((item) => (item ? toBullMqJobId(String(item).trim()) : ""))
         .filter(Boolean);
 
       if (!normalized.length) {
@@ -1774,9 +1778,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     registerJobIds([
-      `verify:${projectId}:${auditId}`,
-      `audit:${projectId}:${auditId}`,
-      `finding-lifecycle:${projectId}:${auditId}`,
+      toBullMqJobId(`verify:${projectId}:${auditId}`),
+      toBullMqJobId(`audit:${projectId}:${auditId}`),
+      toBullMqJobId(`finding-lifecycle:${projectId}:${auditId}`),
     ]);
   }, [auditId, isAuditInProgress, projectId, registerJobIds]);
 
@@ -2676,10 +2680,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         verifyJobId: string | null;
       };
 
-      const verifyJobId =
-        payload.verifyJobId ?? `verify:${projectId}:${payload.auditRun.id}`;
-      const auditJobId = `audit:${projectId}:${payload.auditRun.id}`;
-      const lifecycleJobId = `finding-lifecycle:${projectId}:${payload.auditRun.id}`;
+      const verifyJobId = payload.verifyJobId
+        ? String(payload.verifyJobId)
+        : toBullMqJobId(`verify:${projectId}:${payload.auditRun.id}`);
+      const auditJobId = toBullMqJobId(
+        `audit:${projectId}:${payload.auditRun.id}`,
+      );
+      const lifecycleJobId = toBullMqJobId(
+        `finding-lifecycle:${projectId}:${payload.auditRun.id}`,
+      );
 
       registerJobIds([verifyJobId, auditJobId, lifecycleJobId]);
       setJobState(verifyJobId);
@@ -3859,10 +3868,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
                 <TabsContent
                   value="findings"
-                  className="mt-0 min-h-0 min-w-0 flex-1"
+                  className="mt-0 min-h-0 min-w-0 flex-1 overflow-hidden"
                 >
-                  <ScrollArea className="h-full min-w-0 px-3 py-3">
-                    <div className="min-w-0 space-y-3 pb-1 pr-1">
+                  <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden px-3 py-3">
+                    <div className="min-w-0 space-y-3 pb-3">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <Input
                           value={findingsQuery}
@@ -3981,16 +3990,16 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         <p className="text-destructive text-xs">{lastError}</p>
                       ) : null}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </TabsContent>
 
                 <TabsContent
                   value="audit-history"
-                  className="mt-0 min-h-0 min-w-0 flex-1"
+                  className="mt-0 min-h-0 min-w-0 flex-1 overflow-hidden"
                 >
-                  <ScrollArea className="h-full min-w-0 px-3 py-3">
-                    <div className="min-w-0 space-y-3 pb-1 pr-1">
-                      <div className="bg-card rounded-lg border border-border p-3">
+                  <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden px-3 py-3">
+                    <div className="min-w-0 space-y-3 pb-3">
+                      <div className="bg-card min-w-0 overflow-hidden rounded-lg border border-border p-3">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <h4 className="text-foreground text-xs font-semibold">
                             Compare Completed Audits
@@ -4005,40 +4014,46 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                           </p>
                         ) : (
                           <div className="space-y-2.5">
-                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                              <label className="text-foreground text-[11px]">
+                            <div className="grid grid-cols-1 gap-2">
+                              <label className="text-foreground min-w-0 text-[11px]">
                                 From (older)
                                 <Select
                                   value={fromCompareAuditId}
                                   onValueChange={setFromCompareAuditId}
                                 >
-                                  <SelectTrigger className="mt-1 h-8 w-full text-[11px]">
+                                  <SelectTrigger className="mt-1 h-8 w-full min-w-0 text-[11px]">
                                     <SelectValue placeholder="Select older audit" />
                                   </SelectTrigger>
-                                  <SelectContent>
+                                  <SelectContent
+                                    position="popper"
+                                    align="start"
+                                    className="w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)]"
+                                  >
                                     {completedAuditHistory.map((item) => (
                                       <SelectItem key={`from-${item.id}`} value={item.id}>
-                                        {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
-                                        {new Date(item.createdAt).toLocaleString()}
+                                        {shortId(item.id)} · rev {shortId(item.revisionId)}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
                               </label>
-                              <label className="text-foreground text-[11px]">
+                              <label className="text-foreground min-w-0 text-[11px]">
                                 To (newer)
                                 <Select
                                   value={toCompareAuditId}
                                   onValueChange={setToCompareAuditId}
                                 >
-                                  <SelectTrigger className="mt-1 h-8 w-full text-[11px]">
+                                  <SelectTrigger className="mt-1 h-8 w-full min-w-0 text-[11px]">
                                     <SelectValue placeholder="Select newer audit" />
                                   </SelectTrigger>
-                                  <SelectContent>
+                                  <SelectContent
+                                    position="popper"
+                                    align="start"
+                                    className="w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)]"
+                                  >
                                     {completedAuditHistory.map((item) => (
                                       <SelectItem key={`to-${item.id}`} value={item.id}>
-                                        {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
-                                        {new Date(item.createdAt).toLocaleString()}
+                                        {shortId(item.id)} · rev {shortId(item.revisionId)}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
@@ -4061,8 +4076,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         )}
 
                         {auditCompareResult ? (
-                          <div className="mt-3 space-y-2 text-xs">
-                            <div className="text-muted-foreground text-[11px]">
+                          <div className="mt-3 min-w-0 space-y-2 text-xs">
+                            <div className="text-muted-foreground break-words text-[11px]">
                               {shortId(auditCompareResult.fromAudit.id)} (
                               {new Date(
                                 auditCompareResult.fromAudit.createdAt,
@@ -4075,33 +4090,33 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                             </div>
 
                             <div className="grid grid-cols-2 gap-1.5">
-                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
-                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                              <div className="bg-muted/70 min-w-0 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground truncate text-[10px] uppercase tracking-wide">
                                   New
                                 </div>
                                 <div className="text-sm font-semibold">
                                   {auditCompareResult.summary.findings.newCount}
                                 </div>
                               </div>
-                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
-                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                              <div className="bg-muted/70 min-w-0 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground truncate text-[10px] uppercase tracking-wide">
                                   Resolved
                                 </div>
                                 <div className="text-sm font-semibold">
                                   {auditCompareResult.summary.findings.resolvedCount}
                                 </div>
                               </div>
-                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
-                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                              <div className="bg-muted/70 min-w-0 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground truncate text-[10px] uppercase tracking-wide">
                                   Persisting
                                 </div>
                                 <div className="text-sm font-semibold">
                                   {auditCompareResult.summary.findings.persistingCount}
                                 </div>
                               </div>
-                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
-                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
-                                  Severity Changed
+                              <div className="bg-muted/70 min-w-0 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground truncate text-[10px] uppercase tracking-wide">
+                                  Severity Delta
                                 </div>
                                 <div className="text-sm font-semibold">
                                   {
@@ -4122,7 +4137,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                   .map((item) => (
                                     <div
                                       key={`new-${item.findingId}`}
-                                      className="text-muted-foreground truncate"
+                                      className="text-muted-foreground break-words"
                                     >
                                       {item.severity} · {item.title} · {item.filePath}:
                                       {item.startLine}
@@ -4143,7 +4158,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                   .map((item) => (
                                     <div
                                       key={`resolved-${item.findingId}`}
-                                      className="text-muted-foreground truncate"
+                                      className="text-muted-foreground break-words"
                                     >
                                       {item.severity} · {item.title} · {item.filePath}:
                                       {item.startLine}
@@ -4164,7 +4179,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                   .map((item) => (
                                     <div
                                       key={`persisting-${item.findingId}`}
-                                      className="text-muted-foreground truncate"
+                                      className="text-muted-foreground break-words"
                                     >
                                       {item.fromSeverity}
                                       {" -> "}
@@ -4182,14 +4197,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
                             <div className="space-y-1 text-[11px]">
                               <div className="text-foreground font-medium">Files</div>
-                              <div className="text-muted-foreground">
+                              <div className="text-muted-foreground break-words">
                                 Added {auditCompareResult.summary.files.addedCount} ·
                                 Removed {auditCompareResult.summary.files.removedCount} ·
                                 Unchanged{" "}
                                 {auditCompareResult.summary.files.unchangedCount}
                               </div>
                               {auditCompareResult.files.added.length ? (
-                                <div className="text-muted-foreground">
+                                <div className="text-muted-foreground break-words">
                                   Added:{" "}
                                   {auditCompareResult.files.added
                                     .slice(0, 5)
@@ -4197,7 +4212,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                 </div>
                               ) : null}
                               {auditCompareResult.files.removed.length ? (
-                                <div className="text-muted-foreground">
+                                <div className="text-muted-foreground break-words">
                                   Removed:{" "}
                                   {auditCompareResult.files.removed
                                     .slice(0, 5)
@@ -4311,7 +4326,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         <p className="text-destructive text-xs">{lastError}</p>
                       ) : null}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </TabsContent>
               </Tabs>
             </aside>

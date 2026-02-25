@@ -1,17 +1,32 @@
 import { NextResponse } from "next/server";
 
-import { requireSession, toApiErrorResponse } from "@/lib/server/api";
+import { checkRateLimit, requireSession, toApiErrorResponse } from "@/lib/server/api";
 import {
   createPdfExport,
   ensureProjectAccess,
   findAuditRunWithProject,
   getPdfExportByAudit
 } from "@/lib/server/domain";
-import { enqueueJob } from "@/lib/server/queues";
+import { enqueueJob, queues } from "@/lib/server/queues";
 import { getObjectSignedUrl } from "@/lib/server/s3";
 
 const PDF_ENQUEUE_COOLDOWN_MS = 30_000;
-const PDF_QUEUED_STALE_MS = 5 * 60_000;
+const PDF_IN_FLIGHT_SCAN_LIMIT = 256;
+
+async function findInFlightPdfJob(projectId: string, auditRunId: string) {
+  const jobs = await queues.pdf.getJobs(
+    ["active", "waiting", "delayed", "prioritized", "waiting-children"],
+    0,
+    PDF_IN_FLIGHT_SCAN_LIMIT,
+    true
+  );
+
+  return (
+    jobs.find(
+      (job) => job.data.projectId === projectId && job.data.auditRunId === auditRunId
+    ) ?? null
+  );
+}
 
 export async function POST(
   request: Request,
@@ -19,6 +34,8 @@ export async function POST(
 ) {
   try {
     const session = await requireSession(request);
+    // 20 export requests per 10 minutes per user.
+    checkRateLimit(session.user.id, "export-pdf", 20, 10 * 60_000);
     const { projectId, auditId } = await context.params;
 
     const project = await ensureProjectAccess(projectId, session.user.id);
@@ -56,8 +73,20 @@ export async function POST(
     const lastUpdatedAt =
       existingPdf?.updatedAt instanceof Date ? existingPdf.updatedAt.getTime() : 0;
     const ageMs = lastUpdatedAt ? now - lastUpdatedAt : Number.POSITIVE_INFINITY;
+    const inFlightJob = await findInFlightPdfJob(projectId, audit.id);
 
-    if (existingPdf?.status === "running") {
+    if (inFlightJob) {
+      return NextResponse.json(
+        {
+          jobId: String(inFlightJob.id),
+          status: existingPdf?.status === "running" ? "running" : "queued",
+          queued: false
+        },
+        { status: 202 }
+      );
+    }
+
+    if (existingPdf?.status === "running" && ageMs < PDF_ENQUEUE_COOLDOWN_MS) {
       return NextResponse.json(
         {
           jobId: null,
@@ -68,7 +97,7 @@ export async function POST(
       );
     }
 
-    if (existingPdf?.status === "queued" && ageMs < PDF_QUEUED_STALE_MS) {
+    if (existingPdf?.status === "queued" && ageMs < PDF_ENQUEUE_COOLDOWN_MS) {
       return NextResponse.json(
         {
           jobId: null,
@@ -79,11 +108,11 @@ export async function POST(
       );
     }
 
-    if (existingPdf && ageMs < PDF_ENQUEUE_COOLDOWN_MS) {
+    if (existingPdf?.status === "failed" && ageMs < PDF_ENQUEUE_COOLDOWN_MS) {
       return NextResponse.json(
         {
           jobId: null,
-          status: existingPdf.status,
+          status: "failed",
           queued: false
         },
         { status: 202 }
@@ -92,8 +121,7 @@ export async function POST(
 
     await createPdfExport(audit.id);
 
-    const enqueueWindow = Math.floor(now / PDF_ENQUEUE_COOLDOWN_MS);
-    const uniqueJobId = `pdf:${projectId}:${audit.id}:${enqueueWindow}`;
+    const uniqueJobId = `pdf:${projectId}:${audit.id}:${crypto.randomUUID()}`;
     const job = await enqueueJob(
       "pdf",
       {
