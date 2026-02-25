@@ -22,12 +22,30 @@ function escapeHtml(input: string) {
     .replaceAll("'", "&#39;");
 }
 
+function readNonEmptyString(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function renderReportHtml(params: {
   report: Record<string, unknown>;
   findings: Array<Record<string, unknown>>;
+  model: {
+    used: string | null;
+    primary: string | null;
+    fallback: string | null;
+  };
 }) {
   const report = params.report;
   const findings = params.findings;
+  const generatedAt = readNonEmptyString(report.generatedAt) ?? new Date().toISOString();
+  const usedModel = params.model.used ?? "Unknown";
+  const primaryModel = params.model.primary ?? "Unknown";
+  const fallbackModel = params.model.fallback ?? "Unknown";
 
   const findingSections = findings
     .map((item, index) => {
@@ -57,17 +75,25 @@ function renderReportHtml(params: {
   <meta charset="utf-8" />
   <title>TON Audit Report</title>
   <style>
-    body { font-family: Arial, sans-serif; color: #0f172a; padding: 32px; }
+    body { font-family: Arial, sans-serif; color: #0f172a; padding: 32px 32px 52px; }
     h1 { margin-bottom: 8px; }
     h2 { margin-top: 28px; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; }
     .meta { color: #475569; font-size: 12px; margin-bottom: 24px; }
+    .meta-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 20px; }
+    .meta-card p { margin: 4px 0; font-size: 12px; color: #334155; }
     .finding { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin-bottom: 16px; page-break-inside: avoid; }
     pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .report-footer { position: fixed; left: 0; right: 0; bottom: 10px; text-align: center; font-size: 11px; color: #64748b; }
   </style>
 </head>
 <body>
   <h1>TON Smart Contract Security Audit</h1>
-  <p class="meta">Generated at ${escapeHtml(new Date().toISOString())}</p>
+  <p class="meta">Generated at ${escapeHtml(generatedAt)}</p>
+  <div class="meta-card">
+    <p><strong>AI/LLM Model Used:</strong> ${escapeHtml(usedModel)}</p>
+    <p><strong>Primary Model:</strong> ${escapeHtml(primaryModel)}</p>
+    <p><strong>Fallback Model:</strong> ${escapeHtml(fallbackModel)}</p>
+  </div>
   <h2>Scope</h2>
   <pre>${escapeHtml(JSON.stringify((report.summary as Record<string, unknown>)?.scope ?? [], null, 2))}</pre>
   <h2>Methodology</h2>
@@ -76,6 +102,7 @@ function renderReportHtml(params: {
   <p>${escapeHtml(String((report.summary as Record<string, unknown>)?.overview ?? ""))}</p>
   <h2>Findings</h2>
   ${findingSections}
+  <footer class="report-footer">audit.circulo.cloud</footer>
 </body>
 </html>`;
 }
@@ -121,10 +148,21 @@ export function createPdfProcessor() {
       const findings = await db.query.findingInstances.findMany({
         where: eq(findingInstances.auditRunId, auditRun.id)
       });
+      const reportModel =
+        auditRun.reportJson.model &&
+        typeof auditRun.reportJson.model === "object"
+          ? (auditRun.reportJson.model as Record<string, unknown>)
+          : {};
 
       const html = renderReportHtml({
         report: auditRun.reportJson,
-        findings: findings as unknown as Array<Record<string, unknown>>
+        findings: findings as unknown as Array<Record<string, unknown>>,
+        model: {
+          used: readNonEmptyString(reportModel.used),
+          primary: readNonEmptyString(reportModel.primary) ?? auditRun.primaryModelId,
+          fallback:
+            readNonEmptyString(reportModel.fallback) ?? auditRun.fallbackModelId
+        }
       });
 
       browser = await chromium.launch({ headless: true });

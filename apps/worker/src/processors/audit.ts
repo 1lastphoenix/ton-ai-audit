@@ -566,6 +566,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
         revisionId: auditRun.revisionId,
         generatedAt: new Date().toISOString(),
         model: {
+          used: usedModel,
           primary: auditRun.primaryModelId,
           fallback: auditRun.fallbackModelId
         },

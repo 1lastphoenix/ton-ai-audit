@@ -8,6 +8,7 @@ export const auditReportSchema = z.object({
   revisionId: z.string().uuid(),
   generatedAt: z.string(),
   model: z.object({
+    used: z.string().min(1).optional(),
     primary: z.string().min(1),
     fallback: z.string().min(1)
   }),
