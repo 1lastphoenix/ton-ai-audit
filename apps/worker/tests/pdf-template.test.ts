@@ -13,6 +13,9 @@ describe("pdf template", () => {
     expect(source).toContain("renderInlineMarkdown");
     expect(source).toContain("Primary Model");
     expect(source).toContain("Fallback Model");
+    expect(source).toContain("toc-col-anchor");
+    expect(source).toContain("report-footer");
+    expect(source).toContain("Remove residual markdown markers");
   });
 
   it("persists the used model in the generated report payload", () => {

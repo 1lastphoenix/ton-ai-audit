@@ -47,18 +47,69 @@ function toStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function renderSafeInlineLink(label: string, href: string) {
+  const safeUrl = safeExternalLink(href);
+  const escapedLabel = escapeHtml(label.trim());
+  if (!safeUrl) {
+    return escapedLabel;
+  }
+
+  const escapedUrl = escapeHtml(safeUrl);
+  return `<a href="${escapedUrl}" target="_blank" rel="noreferrer">${escapedLabel}</a>`;
+}
+
+function protectInlineMarkdownTokens(value: string) {
+  const tokens: string[] = [];
+  const reserveToken = (html: string) => {
+    const key = `%%TOKEN${tokens.length}%%`;
+    tokens.push(html);
+    return key;
+  };
+
+  let output = value;
+  output = output.replace(/`([^`\n]+)`/g, (_match, code: string) =>
+    reserveToken(`<code>${escapeHtml(code)}</code>`)
+  );
+  output = output.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, href: string) =>
+    reserveToken(renderSafeInlineLink(label, href.trim()))
+  );
+
+  return {
+    output,
+    tokens
+  };
+}
+
+function restoreInlineMarkdownTokens(value: string, tokens: string[]) {
+  return value.replace(/%%TOKEN(\d+)%%/g, (_match, rawIndex: string) => {
+    const index = Number.parseInt(rawIndex, 10);
+    return Number.isFinite(index) && tokens[index] ? tokens[index] : "";
+  });
+}
+
 function renderInlineMarkdown(input: string) {
-  let escaped = escapeHtml(input);
+  const normalized = input.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return "";
+  }
 
-  escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  escaped = escaped.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  escaped = escaped.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, "$1<em>$2</em>");
-  escaped = escaped.replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?:;]|$)/g, "$1<em>$2</em>");
-  escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
-  escaped = escaped.replace(/\*{2,}/g, "");
+  const protectedContent = protectInlineMarkdownTokens(normalized);
+  let escaped = escapeHtml(protectedContent.output);
+
+  escaped = escaped.replace(/^#{1,6}\s+/gm, "");
+  escaped = escaped.replace(/(^|[\s(])&gt;\s+/g, "$1");
+  escaped = escaped.replace(/(\*\*|__)([^*_\n][^*\n]*?)\1/g, "<strong>$2</strong>");
+  escaped = escaped.replace(/(\*|_)([^*_\n][^*\n]*?)\1/g, "<em>$2</em>");
+  escaped = escaped.replace(/~~([^~\n]+)~~/g, "<s>$1</s>");
+
+  // Remove residual markdown markers so literals like **** or __ do not leak into PDF text.
+  escaped = escaped.replace(/(^|[\s(])[*_]{1,4}(?=[\s).,!?:;]|$)/g, "$1");
+  escaped = escaped.replace(/[*]{2,}/g, "");
   escaped = escaped.replace(/_{2,}/g, "");
+  escaped = escaped.replace(/(^|[\s(])\*([^<>\n]{1,120}?)(?=[\s).,!?:;]|$)/g, "$1$2");
+  escaped = escaped.replace(/(^|[\s(])_([^<>\n]{1,120}?)(?=[\s).,!?:;]|$)/g, "$1$2");
 
-  return escaped;
+  return restoreInlineMarkdownTokens(escaped, protectedContent.tokens);
 }
 
 function renderRichTextBlock(value: unknown, fallback = "n/a") {
@@ -429,64 +480,85 @@ function renderReportHtml(params: {
     :root {
       --brand-primary: ${escapeHtml(params.branding.primaryColor)};
       --brand-accent: ${escapeHtml(params.branding.accentColor)};
-      --text: #111827;
+      --text: #0f172a;
       --muted: #475569;
-      --line: #d0d7de;
+      --line: #dbe3ec;
+      --line-strong: #c8d4e2;
       --bg-soft: #f8fafc;
-      --bg-soft-strong: #eef2f7;
+      --bg-soft-strong: #eef3f8;
+      --bg-panel: #f5f8fc;
+      --radius-sm: 6px;
+      --radius-md: 10px;
     }
-    @page { size: A4; margin: 26px 22px 36px 22px; }
+    @page { size: A4; margin: 18mm 14mm 18mm 14mm; }
     * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
     body {
       font-family: "Segoe UI", "Calibri", Arial, sans-serif;
       color: var(--text);
-      margin: 0;
-      font-size: 12px;
-      line-height: 1.5;
+      font-size: 11.5px;
+      line-height: 1.55;
+      background: white;
     }
     h1, h2, h3, h4 { margin: 0; }
-    h1 { font-size: 28px; line-height: 1.15; letter-spacing: 0.01em; }
-    h2 { margin-bottom: 8px; color: var(--brand-primary); font-size: 18px; }
-    h3 { font-size: 14px; }
+    h1 { font-size: 27px; line-height: 1.15; letter-spacing: 0.01em; }
+    h2 {
+      margin-bottom: 8px;
+      color: var(--brand-primary);
+      font-size: 17px;
+      line-height: 1.25;
+    }
+    h3 { font-size: 14px; line-height: 1.35; }
     h4 {
-      margin: 10px 0 6px;
+      margin: 11px 0 6px;
       color: var(--brand-primary);
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
     p { margin: 0 0 8px; }
-    .section { margin-top: 18px; page-break-inside: avoid; }
+    .section {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: white;
+      page-break-inside: auto;
+    }
+    .section > :first-child { margin-top: 0; }
+    .section > :last-child { margin-bottom: 0; }
     .page-break-before { page-break-before: always; }
     .muted { color: var(--muted); }
     .logo {
-      width: 72px;
-      height: 72px;
+      width: 74px;
+      height: 74px;
       object-fit: contain;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       background: white;
       padding: 8px;
     }
     .logo-fallback {
-      width: 72px;
-      height: 72px;
+      width: 74px;
+      height: 74px;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       display: grid;
       place-items: center;
-      background: linear-gradient(160deg, var(--bg-soft), white);
+      background: linear-gradient(160deg, var(--bg-soft), #ffffff);
       color: var(--brand-primary);
       font-size: 28px;
       font-weight: 700;
     }
     .cover {
-      min-height: 100vh;
+      min-height: 245mm;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 8px 0 4px;
+      padding: 0;
       page-break-after: always;
+      border: none;
+      background: transparent;
     }
     .cover-top {
       display: grid;
@@ -501,58 +573,124 @@ function renderReportHtml(params: {
       margin: 6px 0 0;
       color: var(--muted);
     }
-    .meta-table, .matrix {
+    .meta-table, .matrix, .toc-table {
       width: 100%;
-      border-collapse: collapse;
+      border-collapse: separate;
+      border-spacing: 0;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
       background: white;
       margin-top: 8px;
+      overflow: hidden;
     }
     .meta-table th, .meta-table td,
-    .matrix th, .matrix td {
-      border: 1px solid var(--line);
-      padding: 7px 8px;
+    .matrix th, .matrix td,
+    .toc-table th, .toc-table td {
+      padding: 8px 10px;
       text-align: left;
       vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
     }
-    .meta-table th,
-    .matrix thead th {
+    .meta-table tr:last-child td, .meta-table tr:last-child th,
+    .matrix tr:last-child td, .matrix tr:last-child th,
+    .toc-table tr:last-child td, .toc-table tr:last-child th {
+      border-bottom: none;
+    }
+    .meta-table th:last-child, .meta-table td:last-child,
+    .matrix th:last-child, .matrix td:last-child,
+    .toc-table th:last-child, .toc-table td:last-child {
+      border-right: none;
+    }
+    .meta-table th, .matrix thead th, .toc-table thead th {
       background: var(--bg-soft);
       font-weight: 600;
       color: #0f172a;
     }
-    .matrix-compact th, .matrix-compact td { padding: 6px 7px; font-size: 11px; }
-    .finding-meta th { width: 18%; }
-    .toc-table td { border: none; border-bottom: 1px dashed var(--line); padding: 8px 0; }
-    .toc-link {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      text-decoration: none;
-      color: #0f172a;
+    .meta-table th { width: 18%; white-space: nowrap; }
+    .matrix-compact th, .matrix-compact td { padding: 7px 8px; font-size: 11px; }
+    .finding-meta th { width: 20%; white-space: nowrap; }
+    .toc-col-index {
+      width: 72px;
+      text-align: center;
+      color: var(--brand-primary);
+      font-weight: 700;
     }
-    .toc-index { min-width: 22px; color: var(--brand-primary); font-weight: 600; }
-    .toc-title { flex: 1; }
-    .toc-dots { flex: 1; border-bottom: 1px dotted var(--line); margin-bottom: 2px; }
-    .toc-target { color: var(--muted); font-size: 11px; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
-    .kpi { border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(180deg, white, var(--bg-soft)); padding: 10px; }
+    .toc-col-anchor {
+      width: 120px;
+      text-align: right;
+      color: var(--muted);
+      font-family: Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .toc-link {
+      display: block;
+      text-decoration: none;
+      color: #0b1324;
+      font-weight: 500;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 9px;
+      margin: 10px 0;
+    }
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: linear-gradient(180deg, #ffffff, var(--bg-panel));
+      padding: 10px;
+    }
     .kpi span { display: block; color: var(--muted); font-size: 11px; }
-    .kpi strong { font-size: 18px; }
-    .finding { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 14px; page-break-inside: avoid; background: white; }
-    .finding-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 8px; }
-    .badge { border-radius: 999px; padding: 3px 9px; font-size: 11px; text-transform: uppercase; border: 1px solid transparent; }
+    .kpi strong { font-size: 18px; line-height: 1.2; }
+    .finding {
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      padding: 12px 12px 10px;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+      background: linear-gradient(180deg, #ffffff, #fbfdff);
+    }
+    .finding-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+    .badge {
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 10px;
+      line-height: 1.3;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
     .sev-critical { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
     .sev-high { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
     .sev-medium { background: #fef9c3; color: #854d0e; border-color: #fde68a; }
     .sev-low { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
     .sev-info { background: #e0f2fe; color: #0c4a6e; border-color: #bae6fd; }
-    .pill { display: inline-block; border: 1px solid var(--line); background: var(--bg-soft); border-radius: 999px; padding: 2px 8px; margin: 2px 4px 2px 0; font-size: 10px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      background: var(--bg-soft);
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin: 2px 4px 2px 0;
+      font-size: 10px;
+      line-height: 1.3;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+    }
     pre {
       background: #0b1220;
       color: #dbe4f0;
-      border: 1px solid var(--line);
-      border-radius: 8px;
+      border: 1px solid #1f2937;
+      border-radius: var(--radius-sm);
       padding: 10px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
@@ -569,15 +707,24 @@ function renderReportHtml(params: {
       font-size: 10px;
     }
     .list { margin: 0; padding-left: 18px; }
-    .references li { margin-bottom: 4px; overflow-wrap: anywhere; }
+    .list li { margin-bottom: 4px; }
+    .references li { overflow-wrap: anywhere; }
     .signoff {
-      margin-top: 16px;
+      margin-top: 14px;
       border-top: 1px solid var(--line);
       padding-top: 12px;
       display: flex;
       justify-content: space-between;
       gap: 12px;
       font-size: 11px;
+    }
+    .report-footer {
+      margin-top: 12px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      text-align: center;
+      font-size: 10px;
+      color: var(--muted);
     }
     a { color: var(--brand-primary); text-decoration: none; }
   </style>
@@ -636,19 +783,21 @@ function renderReportHtml(params: {
   <section class="section page-break-before">
     <h2>Table of Contents</h2>
     <table class="toc-table">
+      <thead>
+        <tr>
+          <th class="toc-col-index">Section</th>
+          <th>Title</th>
+          <th class="toc-col-anchor">Anchor</th>
+        </tr>
+      </thead>
       <tbody>
         ${tocEntries
           .map(
             (entry) => `
               <tr>
-                <td>
-                  <a class="toc-link" href="#${escapeHtml(entry.target)}">
-                    <span class="toc-index">${escapeHtml(entry.index)}</span>
-                    <span class="toc-title">${escapeHtml(entry.title)}</span>
-                    <span class="toc-dots"></span>
-                    <span class="toc-target">Section</span>
-                  </a>
-                </td>
+                <td class="toc-col-index">${escapeHtml(entry.index)}</td>
+                <td><a class="toc-link" href="#${escapeHtml(entry.target)}">${escapeHtml(entry.title)}</a></td>
+                <td class="toc-col-anchor">#${escapeHtml(entry.target)}</td>
               </tr>
             `
           )
@@ -808,7 +957,7 @@ function renderReportHtml(params: {
       <div class="muted">Generated ${escapeHtml(generatedAt)}</div>
     </div>
   </section>
-  <footer class="section muted">audit.circulo.cloud</footer>
+  <footer class="report-footer">audit.circulo.cloud</footer>
 </body>
 </html>`;
 }
@@ -903,19 +1052,30 @@ export function createPdfProcessor() {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle" });
+      const generatedAtLabel = formatDateLabel(report.generatedAt);
 
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
         displayHeaderFooter: true,
-        headerTemplate: `<div style="font-size:9px;width:100%;text-align:center;color:#64748b;">${escapeHtml(report.auditId)} · FINAL AUDIT REPORT</div>`,
+        headerTemplate: `
+          <div style="font-size:8px;width:100%;padding:0 14mm;color:#475569;display:flex;justify-content:space-between;align-items:center;">
+            <span>${escapeHtml(report.auditId)} · FINAL AUDIT REPORT</span>
+            <span>${escapeHtml(generatedAtLabel)}</span>
+          </div>
+        `,
         footerTemplate:
-          '<div style="font-size:9px;width:100%;text-align:center;color:#64748b;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
+          `
+            <div style="font-size:8px;width:100%;padding:0 14mm;color:#475569;display:flex;justify-content:space-between;align-items:center;">
+              <span>audit.circulo.cloud</span>
+              <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+            </div>
+          `,
         margin: {
-          top: "40px",
-          right: "22px",
-          bottom: "36px",
-          left: "22px"
+          top: "18mm",
+          right: "14mm",
+          bottom: "18mm",
+          left: "14mm"
         }
       });
 
