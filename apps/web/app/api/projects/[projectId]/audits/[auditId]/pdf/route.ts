@@ -10,6 +10,9 @@ import {
 import { enqueueJob } from "@/lib/server/queues";
 import { getObjectSignedUrl } from "@/lib/server/s3";
 
+const PDF_ENQUEUE_COOLDOWN_MS = 30_000;
+const PDF_QUEUED_STALE_MS = 5 * 60_000;
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ projectId: string; auditId: string }> }
@@ -37,8 +40,60 @@ export async function POST(
       );
     }
 
+    const existingPdf = await getPdfExportByAudit(audit.id);
+    if (existingPdf?.status === "completed" && existingPdf.s3Key) {
+      return NextResponse.json(
+        {
+          jobId: null,
+          status: "completed",
+          queued: false
+        },
+        { status: 200 }
+      );
+    }
+
+    const now = Date.now();
+    const lastUpdatedAt =
+      existingPdf?.updatedAt instanceof Date ? existingPdf.updatedAt.getTime() : 0;
+    const ageMs = lastUpdatedAt ? now - lastUpdatedAt : Number.POSITIVE_INFINITY;
+
+    if (existingPdf?.status === "running") {
+      return NextResponse.json(
+        {
+          jobId: null,
+          status: "running",
+          queued: false
+        },
+        { status: 202 }
+      );
+    }
+
+    if (existingPdf?.status === "queued" && ageMs < PDF_QUEUED_STALE_MS) {
+      return NextResponse.json(
+        {
+          jobId: null,
+          status: "queued",
+          queued: false
+        },
+        { status: 202 }
+      );
+    }
+
+    if (existingPdf && ageMs < PDF_ENQUEUE_COOLDOWN_MS) {
+      return NextResponse.json(
+        {
+          jobId: null,
+          status: existingPdf.status,
+          queued: false
+        },
+        { status: 202 }
+      );
+    }
+
     await createPdfExport(audit.id);
 
+    const enqueueWindow = Math.floor(now / PDF_ENQUEUE_COOLDOWN_MS);
+    const uniqueJobId = `pdf:${projectId}:${audit.id}:${enqueueWindow}`;
     const job = await enqueueJob(
       "pdf",
       {
@@ -46,10 +101,17 @@ export async function POST(
         auditRunId: audit.id,
         requestedByUserId: session.user.id
       },
-      `pdf:${projectId}:${audit.id}`
+      uniqueJobId
     );
 
-    return NextResponse.json({ jobId: job.id }, { status: 202 });
+    return NextResponse.json(
+      {
+        jobId: job.id,
+        status: "queued",
+        queued: true
+      },
+      { status: 202 }
+    );
   } catch (error) {
     return toApiErrorResponse(error);
   }

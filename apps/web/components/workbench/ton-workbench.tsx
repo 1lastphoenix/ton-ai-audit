@@ -68,6 +68,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -675,6 +682,10 @@ function pdfStatusBadgeClass(status: string) {
   }
 }
 
+function canExportAuditPdf(auditStatus?: string | null, pdfStatus?: string | null) {
+  return auditStatus === "completed" || pdfStatus === "completed";
+}
+
 function workbenchLogLevelClass(level: WorkbenchLogLevel) {
   switch (level) {
     case "error":
@@ -1142,8 +1153,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const staleBackendWarningShownRef = useRef(false);
 
   const uploadInputId = useId();
-  const compareFromSelectId = `${uploadInputId}-compare-from`;
-  const compareToSelectId = `${uploadInputId}-compare-to`;
   const modelStorageKey = `ton-audit:model-selection:${projectId}`;
   const allFiles = useMemo(() => treeFiles(tree), [tree]);
   const expandedDirectorySet = useMemo(
@@ -1275,14 +1284,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const activeAuditHistoryItem = useMemo(
     () => auditHistory.find((item) => item.id === auditId) ?? null,
     [auditHistory, auditId],
-  );
-  const rightPanelStats = useMemo(
-    () => [
-      { id: "findings", label: "Findings", value: findings.length },
-      { id: "audits", label: "Audits", value: auditHistory.length },
-      { id: "tabs", label: "Open tabs", value: openTabs.length },
-    ],
-    [auditHistory.length, findings.length, openTabs.length],
   );
   const findingSeveritySummary = useMemo(() => {
     const counts = {
@@ -2714,7 +2715,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     const isCompleted =
       targetAudit?.status === "completed" ||
       (targetAuditId === auditId && auditStatus === "completed");
-    if (!isCompleted) {
+    const canExport =
+      canExportAuditPdf(targetAudit?.status, targetAudit?.pdfStatus) ||
+      (targetAuditId === auditId && canExportAuditPdf(auditStatus, null));
+    if (!canExport) {
       const message = "PDF export is available after the audit completes.";
       setLastError(message);
       setActivityMessage("Audit is still running. PDF export is unavailable.");
@@ -2724,12 +2728,45 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     setIsBusy(true);
     setLastError(null);
-    setActivityMessage("Queueing PDF export...");
+    setActivityMessage("Preparing PDF export...");
     pushWorkbenchLog(
       "info",
-      `Queueing PDF export for audit ${shortId(targetAuditId)}.`,
+      `Preparing PDF export for audit ${shortId(targetAuditId)}.`,
     );
     try {
+      const existingStatusResponse = await fetch(
+        `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
+        {
+          cache: "no-store",
+        },
+      );
+      if (existingStatusResponse.ok) {
+        const existingStatusPayload = (await existingStatusResponse.json()) as {
+          status: string;
+          url: string | null;
+        };
+        if (existingStatusPayload.url) {
+          window.open(existingStatusPayload.url, "_blank", "noopener,noreferrer");
+          setActivityMessage("PDF is ready and opened in a new tab.");
+          pushWorkbenchLog(
+            "info",
+            `Opened existing PDF for audit ${shortId(targetAuditId)}.`,
+          );
+          return;
+        }
+      }
+
+      if (!isCompleted) {
+        throw new Error(
+          "PDF is marked ready but the download URL is unavailable. Refresh and try again.",
+        );
+      }
+
+      setActivityMessage("Queueing PDF export...");
+      pushWorkbenchLog(
+        "info",
+        `Queueing PDF export for audit ${shortId(targetAuditId)}.`,
+      );
       const start = await fetch(
         `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
         {
@@ -3446,7 +3483,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         !auditId ||
                         isBusy ||
                         (activeAuditHistoryItem
-                          ? activeAuditHistoryItem.status !== "completed"
+                          ? !canExportAuditPdf(
+                              activeAuditHistoryItem.status,
+                              activeAuditHistoryItem.pdfStatus,
+                            )
                           : auditStatus !== "completed")
                       }
                       onClick={() => {
@@ -3766,7 +3806,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               <Tabs
                 value={rightPanelTab}
                 onValueChange={handleRightPanelTabChange}
-                className="h-full gap-0"
+                className="h-full min-h-0 min-w-0 gap-0"
               >
                 <div className="bg-card/40 border-b border-border px-3 pb-3 pt-3">
                   <div className="flex items-start justify-between gap-2">
@@ -3794,22 +3834,6 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                     </Badge>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-3 gap-1.5">
-                    {rightPanelStats.map((stat) => (
-                      <div
-                        key={stat.id}
-                        className="bg-background/70 rounded-md border border-border/80 px-2 py-1.5"
-                      >
-                        <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
-                          {stat.label}
-                        </div>
-                        <div className="text-foreground text-sm font-semibold leading-4">
-                          {stat.value}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
                   <TabsList className="mt-3 grid h-8 w-full grid-cols-2">
                     {rightPanelTabConfig.map((tab) => {
                       const Icon = tab.icon;
@@ -3833,10 +3857,13 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                   </TabsList>
                 </div>
 
-                <TabsContent value="findings" className="mt-0 min-h-0 flex-1">
-                  <ScrollArea className="h-full px-3 py-3">
-                    <div className="space-y-3 pb-1">
-                      <div className="flex items-center gap-1.5">
+                <TabsContent
+                  value="findings"
+                  className="mt-0 min-h-0 min-w-0 flex-1"
+                >
+                  <ScrollArea className="h-full min-w-0 px-3 py-3">
+                    <div className="min-w-0 space-y-3 pb-1 pr-1">
+                      <div className="flex min-w-0 items-center gap-1.5">
                         <Input
                           value={findingsQuery}
                           onChange={(event) => {
@@ -3861,7 +3888,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         ) : null}
                       </div>
 
-                      <div className="grid grid-cols-3 gap-1.5">
+                      <div className="grid min-w-0 grid-cols-2 gap-1.5">
                         {findingFilterOptions.map((option) => (
                           <Button
                             key={option.id}
@@ -3873,7 +3900,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                 : "ghost"
                             }
                             className={cn(
-                              "h-auto min-h-8 flex-col items-start gap-0 rounded-md border px-2 py-1.5 text-left",
+                              "h-auto min-h-8 w-full min-w-0 flex-col items-start gap-0 whitespace-normal rounded-md border px-2 py-1.5 text-left",
                               findingsSeverityFilter === option.id
                                 ? severityBadgeClass(option.label)
                                 : "border-border bg-card hover:bg-accent/35",
@@ -3912,12 +3939,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                 key={item.id}
                                 type="button"
                                 variant="ghost"
-                                className="bg-card h-auto w-full justify-start rounded-md border border-border p-2.5 text-left hover:bg-accent/35"
+                                className="bg-card h-auto w-full min-w-0 justify-start whitespace-normal rounded-md border border-border p-2.5 text-left hover:bg-accent/35"
                                 onClick={() => {
                                   revealFindingInEditor(item);
                                 }}
                               >
-                                <div className="w-full">
+                                <div className="w-full min-w-0">
                                   <div className="flex items-start justify-between gap-2">
                                     <Badge
                                       variant="outline"
@@ -3929,17 +3956,17 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                       {formatSeverityLabel(severity)}
                                     </Badge>
                                     {filePath ? (
-                                      <span className="text-muted-foreground truncate text-[10px] leading-5">
+                                      <span className="text-muted-foreground max-w-[65%] truncate text-[10px] leading-5">
                                         {filePath}
                                         {line ? `:${line}` : ""}
                                       </span>
                                     ) : null}
                                   </div>
-                                  <div className="text-foreground mt-1.5 text-xs font-medium leading-4">
+                                  <div className="text-foreground mt-1.5 break-words text-xs font-medium leading-4">
                                     {title}
                                   </div>
                                   {summary ? (
-                                    <div className="text-muted-foreground mt-1 line-clamp-2 text-[11px] leading-4">
+                                    <div className="text-muted-foreground mt-1 line-clamp-2 break-words text-[11px] leading-4">
                                       {summary}
                                     </div>
                                   ) : null}
@@ -3957,9 +3984,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                   </ScrollArea>
                 </TabsContent>
 
-                <TabsContent value="audit-history" className="mt-0 min-h-0 flex-1">
-                  <ScrollArea className="h-full px-3 py-3">
-                    <div className="space-y-3 pb-1">
+                <TabsContent
+                  value="audit-history"
+                  className="mt-0 min-h-0 min-w-0 flex-1"
+                >
+                  <ScrollArea className="h-full min-w-0 px-3 py-3">
+                    <div className="min-w-0 space-y-3 pb-1 pr-1">
                       <div className="bg-card rounded-lg border border-border p-3">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <h4 className="text-foreground text-xs font-semibold">
@@ -3976,47 +4006,43 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         ) : (
                           <div className="space-y-2.5">
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                              <label
-                                htmlFor={compareFromSelectId}
-                                className="text-foreground text-[11px]"
-                              >
+                              <label className="text-foreground text-[11px]">
                                 From (older)
-                                <select
-                                  id={compareFromSelectId}
+                                <Select
                                   value={fromCompareAuditId}
-                                  onChange={(event) =>
-                                    setFromCompareAuditId(event.target.value)
-                                  }
-                                  className="bg-background mt-1 h-8 w-full rounded-md border border-border px-2 text-[11px]"
+                                  onValueChange={setFromCompareAuditId}
                                 >
-                                  {completedAuditHistory.map((item) => (
-                                    <option key={`from-${item.id}`} value={item.id}>
-                                      {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
-                                      {new Date(item.createdAt).toLocaleString()}
-                                    </option>
-                                  ))}
-                                </select>
+                                  <SelectTrigger className="mt-1 h-8 w-full text-[11px]">
+                                    <SelectValue placeholder="Select older audit" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {completedAuditHistory.map((item) => (
+                                      <SelectItem key={`from-${item.id}`} value={item.id}>
+                                        {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
+                                        {new Date(item.createdAt).toLocaleString()}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </label>
-                              <label
-                                htmlFor={compareToSelectId}
-                                className="text-foreground text-[11px]"
-                              >
+                              <label className="text-foreground text-[11px]">
                                 To (newer)
-                                <select
-                                  id={compareToSelectId}
+                                <Select
                                   value={toCompareAuditId}
-                                  onChange={(event) =>
-                                    setToCompareAuditId(event.target.value)
-                                  }
-                                  className="bg-background mt-1 h-8 w-full rounded-md border border-border px-2 text-[11px]"
+                                  onValueChange={setToCompareAuditId}
                                 >
-                                  {completedAuditHistory.map((item) => (
-                                    <option key={`to-${item.id}`} value={item.id}>
-                                      {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
-                                      {new Date(item.createdAt).toLocaleString()}
-                                    </option>
-                                  ))}
-                                </select>
+                                  <SelectTrigger className="mt-1 h-8 w-full text-[11px]">
+                                    <SelectValue placeholder="Select newer audit" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {completedAuditHistory.map((item) => (
+                                      <SelectItem key={`to-${item.id}`} value={item.id}>
+                                        {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
+                                        {new Date(item.createdAt).toLocaleString()}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </label>
                             </div>
 
@@ -4265,7 +4291,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                     size="sm"
                                     variant="outline"
                                     className="h-7 px-2 text-[11px]"
-                                    disabled={item.status !== "completed" || isBusy}
+                                    disabled={
+                                      !canExportAuditPdf(item.status, item.pdfStatus) ||
+                                      isBusy
+                                    }
                                     onClick={() => {
                                       void exportPdfForAudit(item.id);
                                     }}

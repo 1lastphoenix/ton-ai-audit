@@ -1138,6 +1138,9 @@ export async function createPdfExport(auditRunId: string) {
       target: pdfExports.auditRunId,
       set: {
         status: "queued",
+        s3Key: null,
+        generatedAt: null,
+        expiresAt: null,
         updatedAt: new Date()
       }
     })
