@@ -22,7 +22,7 @@ export async function POST(
     const session = await requireSession(request);
     const { projectId, workingCopyId } = await context.params;
     // 10 audit runs per 10 minutes per user.
-    checkRateLimit(session.user.id, "run-audit", 10, 10 * 60_000);
+    await checkRateLimit(session.user.id, "run-audit", 10, 10 * 60_000);
 
     const project = await ensureProjectAccess(projectId, session.user.id);
     if (!project) {

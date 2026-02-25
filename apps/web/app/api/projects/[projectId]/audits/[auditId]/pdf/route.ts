@@ -39,7 +39,7 @@ export async function POST(
     const variant = FINAL_PDF_VARIANT;
     const session = await requireSession(request);
     // 20 export requests per 10 minutes per user.
-    checkRateLimit(session.user.id, "export-pdf", 20, 10 * 60_000);
+    await checkRateLimit(session.user.id, "export-pdf", 20, 10 * 60_000);
     const { projectId, auditId } = await context.params;
 
     const project = await ensureProjectAccess(projectId, session.user.id);

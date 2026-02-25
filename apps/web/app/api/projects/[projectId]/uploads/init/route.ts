@@ -24,7 +24,7 @@ export async function POST(
     const session = await requireSession(request);
     const { projectId } = await context.params;
     // 20 upload initiations per minute per user.
-    checkRateLimit(session.user.id, "upload-init", 20, 60_000);
+    await checkRateLimit(session.user.id, "upload-init", 20, 60_000);
 
     const project = await ensureProjectAccess(projectId, session.user.id);
     if (!project) {

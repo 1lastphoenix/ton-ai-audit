@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireSession(request);
     // 5 project creations per minute per user.
-    checkRateLimit(session.user.id, "create-project", 5, 60_000);
+    await checkRateLimit(session.user.id, "create-project", 5, 60_000);
     const body = await parseJsonBody(request, createProjectSchema);
 
     const project = await createProject({

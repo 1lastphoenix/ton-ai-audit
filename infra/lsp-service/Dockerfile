@@ -10,7 +10,14 @@ COPY package.json ./
 COPY server.mjs ./
 RUN npm install --omit=dev
 
-RUN git clone --depth 1 https://github.com/ton-blockchain/ton-language-server.git /opt/ton-language-server
+ARG TON_LSP_REPO=https://github.com/ton-blockchain/ton-language-server.git
+ARG TON_LSP_GIT_REF=b9ff0dfcf8261b68e1053e5afb317ea98c43991a
+RUN git init /opt/ton-language-server \
+  && cd /opt/ton-language-server \
+  && git remote add origin "${TON_LSP_REPO}" \
+  && git fetch --depth 1 origin "${TON_LSP_GIT_REF}" \
+  && git checkout --detach FETCH_HEAD \
+  && test "$(git rev-parse HEAD)" = "${TON_LSP_GIT_REF}"
 RUN cd /opt/ton-language-server \
   && corepack enable \
   && yarn install --immutable \
@@ -33,6 +40,7 @@ RUN test -f /opt/ton-language-server/wasm/tree-sitter-tolk.wasm \
   && test -f /opt/ton-language-server/dist/tree-sitter-func.wasm \
   && test -f /opt/ton-language-server/dist/tree-sitter-fift.wasm \
   && test -f /opt/ton-language-server/dist/tree-sitter-tlb.wasm
+RUN rm -rf /opt/ton-language-server/.git
 
 ENV PORT=3002
 ENV TON_LSP_COMMAND=node

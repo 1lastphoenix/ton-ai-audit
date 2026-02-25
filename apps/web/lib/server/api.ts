@@ -55,13 +55,21 @@ export async function requireSession(request: Request) {
  * @param limit    Max requests per window (default 10).
  * @param windowMs Window duration in ms (default 60 s).
  */
-export function checkRateLimit(
+export async function checkRateLimit(
   userId: string,
   endpoint: string,
   limit = 10,
   windowMs = 60_000
 ) {
-  if (isRateLimited(`${userId}:${endpoint}`, limit, windowMs)) {
+  let limited: boolean;
+
+  try {
+    limited = await isRateLimited(`${userId}:${endpoint}`, limit, windowMs);
+  } catch {
+    throw new ApiError("Rate limiter unavailable. Please retry shortly.", 503);
+  }
+
+  if (limited) {
     throw new ApiError("Too many requests. Please slow down.", 429);
   }
 }

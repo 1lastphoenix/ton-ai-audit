@@ -363,8 +363,8 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
       await db
         .update(projects)
         .set({
-          lifecycleState: "deleted",
-          deletedAt: new Date(),
+          lifecycleState: "ready",
+          deletedAt: null,
           updatedAt: new Date(),
         })
         .where(

@@ -1,27 +1,42 @@
-/**
- * Sliding-window in-memory rate limiter.
- *
- * Suitable for single-process deployments. For multi-instance deployments
- * replace with a Redis-backed limiter (e.g., @upstash/ratelimit).
- */
+import { randomUUID } from "node:crypto";
 
-type WindowEntry = {
-  count: number;
-  windowStart: number;
-};
+import { getRedisConnection } from "./redis";
 
-const windows = new Map<string, WindowEntry>();
+const RATE_LIMIT_KEY_PREFIX = "rate-limit";
 
-// Clean up stale entries every 5 minutes to prevent unbounded memory growth.
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of windows) {
-    if (now - entry.windowStart > CLEANUP_INTERVAL_MS) {
-      windows.delete(key);
-    }
+// Sliding-window limiter implemented atomically in Redis.
+const SLIDING_WINDOW_RATE_LIMIT_SCRIPT = `
+local key = KEYS[1]
+local now_ms = tonumber(ARGV[1])
+local window_ms = tonumber(ARGV[2])
+local max_requests = tonumber(ARGV[3])
+local member = ARGV[4]
+
+redis.call("ZREMRANGEBYSCORE", key, 0, now_ms - window_ms)
+local current = redis.call("ZCARD", key)
+
+if current >= max_requests then
+  redis.call("PEXPIRE", key, window_ms)
+  return 1
+end
+
+redis.call("ZADD", key, now_ms, member)
+redis.call("PEXPIRE", key, window_ms)
+return 0
+`;
+
+function normalizePositiveInteger(value: number, fallback: number) {
+  if (!Number.isFinite(value)) {
+    return fallback;
   }
-}, CLEANUP_INTERVAL_MS);
+
+  const normalized = Math.trunc(value);
+  return normalized > 0 ? normalized : fallback;
+}
+
+function toRedisRateLimitKey(key: string) {
+  return `${RATE_LIMIT_KEY_PREFIX}:${key}`;
+}
 
 /**
  * Returns true if the request should be rate-limited (i.e. limit exceeded).
@@ -30,19 +45,22 @@ setInterval(() => {
  * @param limit    Max requests allowed per window.
  * @param windowMs Window duration in milliseconds.
  */
-export function isRateLimited(key: string, limit: number, windowMs: number): boolean {
-  const now = Date.now();
-  const entry = windows.get(key);
+export async function isRateLimited(key: string, limit: number, windowMs: number): Promise<boolean> {
+  const redis = getRedisConnection();
+  const normalizedLimit = normalizePositiveInteger(limit, 1);
+  const normalizedWindowMs = normalizePositiveInteger(windowMs, 60_000);
+  const nowMs = Date.now();
+  const member = `${nowMs}:${randomUUID()}`;
 
-  if (!entry || now - entry.windowStart > windowMs) {
-    windows.set(key, { count: 1, windowStart: now });
-    return false;
-  }
+  const result = await redis.eval(
+    SLIDING_WINDOW_RATE_LIMIT_SCRIPT,
+    1,
+    toRedisRateLimitKey(key),
+    String(nowMs),
+    String(normalizedWindowMs),
+    String(normalizedLimit),
+    member
+  );
 
-  if (entry.count >= limit) {
-    return true;
-  }
-
-  entry.count += 1;
-  return false;
+  return Number(result) === 1;
 }
