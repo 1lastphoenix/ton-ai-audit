@@ -19,6 +19,32 @@ export type RevisionFileContent = {
   content: string;
 };
 
+function getErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function isPgUniqueViolation(error: unknown, constraint?: string): boolean {
+  if (getErrorCode(error) !== "23505") {
+    return false;
+  }
+
+  if (!constraint) {
+    return true;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const violatedConstraint = (error as { constraint?: unknown }).constraint;
+  return violatedConstraint === constraint;
+}
+
 export async function loadRevisionFilesWithContent(
   revisionId: string
 ): Promise<RevisionFileContent[]> {
@@ -65,21 +91,35 @@ async function ensureBlobFromContent(content: string) {
     contentType: "text/plain; charset=utf-8"
   });
 
-  const [created] = await db
-    .insert(fileBlobs)
-    .values({
-      sha256: sha,
-      sizeBytes: Buffer.byteLength(content, "utf8"),
-      s3Key: key,
-      contentType: "text/plain; charset=utf-8"
-    })
-    .returning();
+  try {
+    const [created] = await db
+      .insert(fileBlobs)
+      .values({
+        sha256: sha,
+        sizeBytes: Buffer.byteLength(content, "utf8"),
+        s3Key: key,
+        contentType: "text/plain; charset=utf-8"
+      })
+      .returning();
 
-  if (!created) {
-    throw new Error("Failed to persist blob");
+    if (!created) {
+      throw new Error("Failed to persist blob");
+    }
+
+    return created;
+  } catch (error) {
+    if (isPgUniqueViolation(error, "file_blobs_sha_unique")) {
+      const concurrentBlob = await db.query.fileBlobs.findFirst({
+        where: eq(fileBlobs.sha256, sha)
+      });
+
+      if (concurrentBlob) {
+        return concurrentBlob;
+      }
+    }
+
+    throw error;
   }
-
-  return created;
 }
 
 export async function upsertRevisionFile(params: {

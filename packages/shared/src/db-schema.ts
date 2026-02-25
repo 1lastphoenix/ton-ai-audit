@@ -353,7 +353,10 @@ export const workingCopies = pgTable(
   },
   (table) => ({
     projectIdx: index("working_copies_project_idx").on(table.projectId),
-    ownerIdx: index("working_copies_owner_idx").on(table.ownerUserId)
+    ownerIdx: index("working_copies_owner_idx").on(table.ownerUserId),
+    activeOwnerBaseUnique: uniqueIndex("working_copies_active_owner_base_unique")
+      .on(table.projectId, table.baseRevisionId, table.ownerUserId)
+      .where(sql`${table.status} = 'active'`)
   })
 );
 
@@ -402,7 +405,10 @@ export const auditRuns = pgTable(
   (table) => ({
     revisionIdx: index("audit_runs_revision_idx").on(table.revisionId),
     statusIdx: index("audit_runs_status_idx").on(table.status),
-    profileIdx: index("audit_runs_profile_idx").on(table.profile)
+    profileIdx: index("audit_runs_profile_idx").on(table.profile),
+    activeProjectUnique: uniqueIndex("audit_runs_project_active_unique")
+      .on(table.projectId)
+      .where(sql`${table.status} in ('queued', 'running')`)
   })
 );
 

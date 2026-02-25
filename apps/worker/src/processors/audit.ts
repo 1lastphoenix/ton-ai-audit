@@ -1925,38 +1925,26 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
             severity: finding.severity
           })
 
-        let findingRecord = await db.query.findings.findFirst({
-          where: and(
-            eq(findings.projectId, auditRun.projectId),
-            eq(findings.stableFingerprint, stableFingerprint)
-          )
-        })
-
-        if (!findingRecord) {
-          const [createdFinding] = await db
-            .insert(findings)
-            .values({
-              projectId: auditRun.projectId,
-              stableFingerprint,
-              firstSeenRevisionId: auditRun.revisionId,
-              lastSeenRevisionId: auditRun.revisionId,
-              currentStatus: "opened"
-            })
-            .returning()
-
-          if (!createdFinding) {
-            throw new Error("Failed to create finding record")
-          }
-
-          findingRecord = createdFinding
-        } else {
-          await db
-            .update(findings)
-            .set({
+        const [findingRecord] = await db
+          .insert(findings)
+          .values({
+            projectId: auditRun.projectId,
+            stableFingerprint,
+            firstSeenRevisionId: auditRun.revisionId,
+            lastSeenRevisionId: auditRun.revisionId,
+            currentStatus: "opened"
+          })
+          .onConflictDoUpdate({
+            target: [findings.projectId, findings.stableFingerprint],
+            set: {
               lastSeenRevisionId: auditRun.revisionId,
               updatedAt: new Date()
-            })
-            .where(eq(findings.id, findingRecord.id))
+            }
+          })
+          .returning()
+
+        if (!findingRecord) {
+          throw new Error("Failed to create finding record")
         }
 
         await db

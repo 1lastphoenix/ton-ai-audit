@@ -4,6 +4,7 @@ import { runAuditSchema } from "@ton-audit/shared";
 
 import { checkRateLimit, parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
 import {
+  ActiveAuditRunConflictError,
   ensureProjectAccess,
   findActiveAuditRun,
   snapshotWorkingCopyAndCreateAuditRun
@@ -79,6 +80,16 @@ export async function POST(
       verifyJobId: verifyJob.id
     });
   } catch (error) {
+    if (error instanceof ActiveAuditRunConflictError) {
+      return NextResponse.json(
+        {
+          error: "An audit is already running for this project.",
+          activeAuditRunId: error.activeAuditRunId
+        },
+        { status: 409 }
+      );
+    }
+
     return toApiErrorResponse(error);
   }
 }

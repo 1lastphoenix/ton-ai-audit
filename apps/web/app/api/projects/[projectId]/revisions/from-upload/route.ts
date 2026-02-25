@@ -5,7 +5,11 @@ import { eq } from "drizzle-orm";
 import { createRevisionFromUploadSchema, uploads } from "@ton-audit/shared";
 
 import { parseJsonBody, requireSession, toApiErrorResponse } from "@/lib/server/api";
-import { createRevisionFromUpload, ensureProjectAccess } from "@/lib/server/domain";
+import {
+  createRevisionFromUpload,
+  ensureProjectAccess,
+  findActiveAuditRun
+} from "@/lib/server/domain";
 import { db } from "@/lib/server/db";
 import { enqueueJob } from "@/lib/server/queues";
 
@@ -20,6 +24,17 @@ export async function POST(
     const project = await ensureProjectAccess(projectId, session.user.id);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const activeAuditRun = await findActiveAuditRun(projectId);
+    if (activeAuditRun) {
+      return NextResponse.json(
+        {
+          error: "An audit is already running for this project.",
+          activeAuditRunId: activeAuditRun.id
+        },
+        { status: 409 }
+      );
     }
 
     const body = await parseJsonBody(request, createRevisionFromUploadSchema);

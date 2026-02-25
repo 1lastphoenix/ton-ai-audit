@@ -1,0 +1,3 @@
+ALTER TABLE "pdf_exports" ALTER COLUMN "variant" SET DEFAULT 'internal';--> statement-breakpoint
+CREATE UNIQUE INDEX "audit_runs_project_active_unique" ON "audit_runs" USING btree ("project_id") WHERE "audit_runs"."status" in ('queued', 'running');--> statement-breakpoint
+CREATE UNIQUE INDEX "working_copies_active_owner_base_unique" ON "working_copies" USING btree ("project_id","base_revision_id","owner_user_id") WHERE "working_copies"."status" = 'active';

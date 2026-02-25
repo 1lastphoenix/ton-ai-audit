@@ -1,5 +1,4 @@
 import { Job } from "bullmq";
-import { eq } from "drizzle-orm";
 
 import {
   docsSources,
@@ -59,37 +58,31 @@ export function createDocsCrawlProcessor(deps: { enqueueJob: EnqueueJob }) {
     let queued = 0;
 
     for (const sourceUrl of sourceUrls) {
-      const existing = await db.query.docsSources.findFirst({
-        where: eq(docsSources.sourceUrl, sourceUrl)
-      });
+      const [source] = await db
+        .insert(docsSources)
+        .values({
+          sourceUrl,
+          sourceType:
+            sourceUrl.includes("github.com") || sourceUrl.includes("raw.githubusercontent.com")
+              ? "github"
+              : "web",
+          checksum: "pending",
+          title: null
+        })
+        .onConflictDoUpdate({
+          target: [docsSources.sourceUrl],
+          set: {
+            updatedAt: new Date()
+          }
+        })
+        .returning({ id: docsSources.id });
 
-      if (!existing) {
-        const [created] = await db
-          .insert(docsSources)
-          .values({
-            sourceUrl,
-            sourceType:
-              sourceUrl.includes("github.com") || sourceUrl.includes("raw.githubusercontent.com")
-                ? "github"
-                : "web",
-            checksum: "pending",
-            title: null
-          })
-          .returning();
-
-        if (created) {
-          queued += 1;
-          await deps.enqueueJob(
-            "docs-index",
-            { sourceId: created.id },
-            `docs-index:${created.id}`
-          );
-        }
+      if (!source) {
         continue;
       }
 
       queued += 1;
-      await deps.enqueueJob("docs-index", { sourceId: existing.id }, `docs-index:${existing.id}`);
+      await deps.enqueueJob("docs-index", { sourceId: source.id }, `docs-index:${source.id}`);
     }
 
     await recordJobEvent({

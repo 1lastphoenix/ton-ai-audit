@@ -259,6 +259,16 @@ function isPgUniqueViolation(error: unknown, constraint?: string): boolean {
   return violatedConstraint === constraint;
 }
 
+const ACTIVE_WORKING_COPY_UNIQUE_CONSTRAINT = "working_copies_active_owner_base_unique";
+const ACTIVE_AUDIT_RUN_UNIQUE_CONSTRAINT = "audit_runs_project_active_unique";
+
+export class ActiveAuditRunConflictError extends Error {
+  constructor(readonly activeAuditRunId: string | null) {
+    super("An audit is already running for this project.");
+    this.name = "ActiveAuditRunConflictError";
+  }
+}
+
 async function putObjectWithRetry(
   params: Parameters<typeof putObject>[0],
   maxAttempts = 3
@@ -482,20 +492,6 @@ export async function createWorkingCopy(params: {
     return existingWorkingCopy;
   }
 
-  const [workingCopy] = await db
-    .insert(workingCopies)
-    .values({
-      projectId: params.projectId,
-      baseRevisionId: params.revisionId,
-      ownerUserId: params.ownerUserId,
-      status: "active"
-    })
-    .returning();
-
-  if (!workingCopy) {
-    throw new Error("Unable to create working copy");
-  }
-
   const revisionRows = await db
     .select({
       path: revisionFiles.path,
@@ -508,21 +504,64 @@ export async function createWorkingCopy(params: {
     .innerJoin(fileBlobs, eq(revisionFiles.blobId, fileBlobs.id))
     .where(eq(revisionFiles.revisionId, params.revisionId));
 
-  if (revisionRows.length) {
-    const workingFiles = await Promise.all(
-      revisionRows.map(async (row) => ({
-        workingCopyId: workingCopy.id,
-        path: row.path,
-        language: row.language,
-        content: (await getObjectText(row.s3Key)) ?? "",
-        isTestFile: row.isTestFile
-      }))
-    );
+  const workingFiles = await Promise.all(
+    revisionRows.map(async (row) => ({
+      path: row.path,
+      language: row.language,
+      content: (await getObjectText(row.s3Key)) ?? "",
+      isTestFile: row.isTestFile
+    }))
+  );
 
-    await db.insert(workingCopyFiles).values(workingFiles);
+  try {
+    return await db.transaction(async (tx) => {
+      const [workingCopy] = await tx
+        .insert(workingCopies)
+        .values({
+          projectId: params.projectId,
+          baseRevisionId: params.revisionId,
+          ownerUserId: params.ownerUserId,
+          status: "active"
+        })
+        .returning();
+
+      if (!workingCopy) {
+        throw new Error("Unable to create working copy");
+      }
+
+      if (workingFiles.length) {
+        await tx.insert(workingCopyFiles).values(
+          workingFiles.map((file) => ({
+            workingCopyId: workingCopy.id,
+            path: file.path,
+            language: file.language,
+            content: file.content,
+            isTestFile: file.isTestFile
+          }))
+        );
+      }
+
+      return workingCopy;
+    });
+  } catch (error) {
+    if (isPgUniqueViolation(error, ACTIVE_WORKING_COPY_UNIQUE_CONSTRAINT)) {
+      const concurrentWorkingCopy = await db.query.workingCopies.findFirst({
+        where: and(
+          eq(workingCopies.projectId, params.projectId),
+          eq(workingCopies.baseRevisionId, params.revisionId),
+          eq(workingCopies.ownerUserId, params.ownerUserId),
+          eq(workingCopies.status, "active")
+        ),
+        orderBy: desc(workingCopies.createdAt)
+      });
+
+      if (concurrentWorkingCopy) {
+        return concurrentWorkingCopy;
+      }
+    }
+
+    throw error;
   }
-
-  return workingCopy;
 }
 
 export async function saveWorkingCopyFile(params: {
@@ -535,34 +574,7 @@ export async function saveWorkingCopyFile(params: {
   const normalizedPath = normalizePath(params.path);
   const language = params.language ?? detectLanguageFromPath(normalizedPath);
 
-  const current = await db.query.workingCopyFiles.findFirst({
-    where: and(
-      eq(workingCopyFiles.workingCopyId, params.workingCopyId),
-      eq(workingCopyFiles.path, normalizedPath)
-    )
-  });
-
-  if (current) {
-    const [updated] = await db
-      .update(workingCopyFiles)
-      .set({
-        content: params.content,
-        language,
-        isTestFile: params.isTestFile ?? current.isTestFile,
-        updatedAt: new Date()
-      })
-      .where(
-        and(
-          eq(workingCopyFiles.workingCopyId, params.workingCopyId),
-          eq(workingCopyFiles.path, normalizedPath)
-        )
-      )
-      .returning();
-
-    return updated;
-  }
-
-  const [created] = await db
+  const [upserted] = await db
     .insert(workingCopyFiles)
     .values({
       workingCopyId: params.workingCopyId,
@@ -571,9 +583,18 @@ export async function saveWorkingCopyFile(params: {
       content: params.content,
       isTestFile: params.isTestFile ?? false
     })
+    .onConflictDoUpdate({
+      target: [workingCopyFiles.workingCopyId, workingCopyFiles.path],
+      set: {
+        content: params.content,
+        language,
+        ...(params.isTestFile === undefined ? {} : { isTestFile: params.isTestFile }),
+        updatedAt: new Date()
+      }
+    })
     .returning();
 
-  return created;
+  return upserted;
 }
 
 export async function snapshotWorkingCopyAndCreateAuditRun(params: {
@@ -596,69 +617,85 @@ export async function snapshotWorkingCopyAndCreateAuditRun(params: {
     throw new Error("Working copy not found");
   }
 
-  const [revision] = await db
-    .insert(revisions)
-    .values({
-      projectId: params.projectId,
-      parentRevisionId: workingCopy.baseRevisionId,
-      source: "working-copy",
-      createdByUserId: params.userId,
-      isImmutable: true,
-      description: `Snapshot from working copy ${workingCopy.id}`
-    })
-    .returning();
-
-  if (!revision) {
-    throw new Error("Failed to create snapshot revision");
+  const preexistingAuditRun = await findActiveAuditRun(params.projectId);
+  if (preexistingAuditRun) {
+    throw new ActiveAuditRunConflictError(preexistingAuditRun.id);
   }
 
   const files = await db.query.workingCopyFiles.findMany({
     where: eq(workingCopyFiles.workingCopyId, params.workingCopyId)
   });
 
-  if (files.length) {
-    const insertedBlobs = await Promise.all(
-      files.map(async (file) => {
-        const blob = await storeFileBlob({
-          revisionId: revision.id,
-          content: file.content
-        });
-
-        return blob;
+  const snapshotRevisionId = randomUUID();
+  const insertedBlobs = await Promise.all(
+    files.map((file) =>
+      storeFileBlob({
+        revisionId: snapshotRevisionId,
+        content: file.content
       })
-    );
+    )
+  );
 
-    await db.insert(revisionFiles).values(
-      files.map((file, index) => ({
-        revisionId: revision.id,
-        path: file.path,
-        language: file.language,
-        blobId: insertedBlobs[index]?.id ?? insertedBlobs[0]!.id,
-        isTestFile: file.isTestFile
-      }))
-    );
+  try {
+    return await db.transaction(async (tx) => {
+      const [revision] = await tx
+        .insert(revisions)
+        .values({
+          id: snapshotRevisionId,
+          projectId: params.projectId,
+          parentRevisionId: workingCopy.baseRevisionId,
+          source: "working-copy",
+          createdByUserId: params.userId,
+          isImmutable: true,
+          description: `Snapshot from working copy ${workingCopy.id}`
+        })
+        .returning();
+
+      if (!revision) {
+        throw new Error("Failed to create snapshot revision");
+      }
+
+      if (files.length) {
+        await tx.insert(revisionFiles).values(
+          files.map((file, index) => ({
+            revisionId: revision.id,
+            path: file.path,
+            language: file.language,
+            blobId: insertedBlobs[index]?.id ?? insertedBlobs[0]!.id,
+            isTestFile: file.isTestFile
+          }))
+        );
+      }
+
+      const [auditRun] = await tx
+        .insert(auditRuns)
+        .values({
+          projectId: params.projectId,
+          revisionId: revision.id,
+          status: "queued",
+          requestedByUserId: params.userId,
+          profile: params.profile,
+          primaryModelId: params.primaryModelId,
+          fallbackModelId: params.fallbackModelId,
+          engineVersion: "ton-audit-pro-v2",
+          reportSchemaVersion: 2
+        })
+        .returning();
+
+      if (!auditRun) {
+        throw new Error("Failed to create audit run");
+      }
+
+      return { revision, auditRun };
+    });
+  } catch (error) {
+    if (isPgUniqueViolation(error, ACTIVE_AUDIT_RUN_UNIQUE_CONSTRAINT)) {
+      const activeAuditRun = await findActiveAuditRun(params.projectId);
+      throw new ActiveAuditRunConflictError(activeAuditRun?.id ?? null);
+    }
+
+    throw error;
   }
-
-  const [auditRun] = await db
-    .insert(auditRuns)
-    .values({
-      projectId: params.projectId,
-      revisionId: revision.id,
-      status: "queued",
-      requestedByUserId: params.userId,
-      profile: params.profile,
-      primaryModelId: params.primaryModelId,
-      fallbackModelId: params.fallbackModelId,
-      engineVersion: "ton-audit-pro-v2",
-      reportSchemaVersion: 2
-    })
-    .returning();
-
-  if (!auditRun) {
-    throw new Error("Failed to create audit run");
-  }
-
-  return { revision, auditRun };
 }
 
 export async function getAuditDiff(projectId: string, auditRunId: string) {

@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { Job } from "bullmq";
 import unzipper from "unzipper";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import {
   acceptedUploadExtensions,
@@ -36,6 +36,34 @@ type UploadManifestEntry = {
   sizeBytes: number;
   contentType: string;
 };
+
+const ACTIVE_AUDIT_RUN_UNIQUE_CONSTRAINT = "audit_runs_project_active_unique";
+
+function getErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function isPgUniqueViolation(error: unknown, constraint?: string): boolean {
+  if (getErrorCode(error) !== "23505") {
+    return false;
+  }
+
+  if (!constraint) {
+    return true;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const violatedConstraint = (error as { constraint?: unknown }).constraint;
+  return violatedConstraint === constraint;
+}
 
 async function loadArchiveFiles(buffer: Buffer): Promise<ArchiveFile[]> {
   const opened = await unzipper.Open.buffer(buffer);
@@ -224,32 +252,48 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           eq(auditRuns.revisionId, revision.id),
         ),
       });
+      let skippedDueToActiveAudit = false;
 
       if (!auditRun) {
         const modelAllowlist = await loadAuditModelAllowlist();
-        const [created] = await db
-          .insert(auditRuns)
-          .values({
-            projectId: revision.projectId,
-            revisionId: revision.id,
-            status: "queued",
-            requestedByUserId: job.data.requestedByUserId,
-            profile: "deep",
-            primaryModelId: modelAllowlist[0] ?? "google/gemini-2.5-flash",
-            fallbackModelId:
-              modelAllowlist[1] ??
-              modelAllowlist[0] ??
-              "google/gemini-2.5-flash",
-            engineVersion: "ton-audit-pro-v2",
-            reportSchemaVersion: 2
-          })
-          .returning();
+        try {
+          const [created] = await db
+            .insert(auditRuns)
+            .values({
+              projectId: revision.projectId,
+              revisionId: revision.id,
+              status: "queued",
+              requestedByUserId: job.data.requestedByUserId,
+              profile: "deep",
+              primaryModelId: modelAllowlist[0] ?? "google/gemini-2.5-flash",
+              fallbackModelId:
+                modelAllowlist[1] ??
+                modelAllowlist[0] ??
+                "google/gemini-2.5-flash",
+              engineVersion: "ton-audit-pro-v2",
+              reportSchemaVersion: 2
+            })
+            .returning();
 
-        if (!created) {
-          throw new Error("Failed to create audit run");
+          if (!created) {
+            throw new Error("Failed to create audit run");
+          }
+
+          auditRun = created;
+        } catch (error) {
+          if (!isPgUniqueViolation(error, ACTIVE_AUDIT_RUN_UNIQUE_CONSTRAINT)) {
+            throw error;
+          }
+
+          skippedDueToActiveAudit = true;
+          auditRun = await db.query.auditRuns.findFirst({
+            where: and(
+              eq(auditRuns.projectId, revision.projectId),
+              inArray(auditRuns.status, ["queued", "running"]),
+            ),
+            orderBy: desc(auditRuns.createdAt),
+          });
         }
-
-        auditRun = created;
       }
 
       await db
@@ -274,17 +318,19 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           ),
         );
 
-      await deps.enqueueJob(
-        "verify",
-        {
-          projectId: revision.projectId,
-          revisionId: revision.id,
-          auditRunId: auditRun.id,
-          profile: auditRun.profile,
-          includeDocsFallbackFetch: true,
-        },
-        `verify:${revision.projectId}:${auditRun.id}`,
-      );
+      if (auditRun && !skippedDueToActiveAudit) {
+        await deps.enqueueJob(
+          "verify",
+          {
+            projectId: revision.projectId,
+            revisionId: revision.id,
+            auditRunId: auditRun.id,
+            profile: auditRun.profile,
+            includeDocsFallbackFetch: true,
+          },
+          `verify:${revision.projectId}:${auditRun.id}`,
+        );
+      }
 
       await recordJobEvent({
         projectId: job.data.projectId,
@@ -293,14 +339,16 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
         event: "completed",
         payload: {
           revisionId: revision.id,
-          auditRunId: auditRun.id,
+          auditRunId: auditRun?.id ?? null,
+          skippedDueToActiveAudit,
           fileCount: files.length,
         },
       });
 
       return {
         revisionId: revision.id,
-        auditRunId: auditRun.id,
+        auditRunId: auditRun?.id ?? null,
+        skippedDueToActiveAudit,
         fileCount: files.length,
       };
     } catch (error) {

@@ -73,12 +73,21 @@ export function createFindingLifecycleProcessor() {
       const { findingId, transition, currentStatus } = transitionEntry;
 
       if (job.data.previousAuditRunId) {
-        await db.insert(findingTransitions).values({
-          findingId,
-          fromAuditRunId: job.data.previousAuditRunId,
-          toAuditRunId: auditRun.id,
-          transition
-        });
+        await db
+          .insert(findingTransitions)
+          .values({
+            findingId,
+            fromAuditRunId: job.data.previousAuditRunId,
+            toAuditRunId: auditRun.id,
+            transition
+          })
+          .onConflictDoNothing({
+            target: [
+              findingTransitions.findingId,
+              findingTransitions.fromAuditRunId,
+              findingTransitions.toAuditRunId
+            ]
+          });
       }
 
       if (currentStatus === "opened") {
