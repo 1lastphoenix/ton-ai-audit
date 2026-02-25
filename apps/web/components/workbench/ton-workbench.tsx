@@ -45,6 +45,7 @@ import {
 } from "@ton-audit/shared";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -68,6 +69,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
@@ -240,6 +242,7 @@ type TonWorkbenchProps = {
   projectName: string;
   initialRevisionId: string | null;
   initialAuditId: string | null;
+  initialWorkingCopyId: string | null;
   modelAllowlist: string[];
 };
 
@@ -261,11 +264,22 @@ type RailToggleConfig = {
   onClick: () => void;
 };
 
+type RightPanelTab = "findings" | "audit-history";
+
 const bottomPanelTabConfig = [
   { id: "audit-log", label: "Audit Log", icon: TerminalSquare },
   { id: "problems", label: "Problems", icon: CircleAlert },
 ] as const satisfies ReadonlyArray<{
   id: "audit-log" | "problems";
+  label: string;
+  icon: LucideIcon;
+}>;
+
+const rightPanelTabConfig = [
+  { id: "findings", label: "Findings", icon: Shield },
+  { id: "audit-history", label: "Audit History", icon: RefreshCcw },
+] as const satisfies ReadonlyArray<{
+  id: RightPanelTab;
   label: string;
   icon: LucideIcon;
 }>;
@@ -533,11 +547,6 @@ function buildTreeFromPaths(paths: string[]): TreeNode[] {
   });
 }
 
-function severityTone(severity: string) {
-  void severity;
-  return "text-foreground";
-}
-
 function getFileName(filePath: string) {
   const parts = filePath.split("/");
   return parts[parts.length - 1] ?? filePath;
@@ -589,16 +598,25 @@ function normalizeSeverity(severity: string) {
   return severity.trim().toLowerCase();
 }
 
+function formatSeverityLabel(severity: string) {
+  const normalized = normalizeSeverity(severity);
+  if (!normalized) {
+    return "Unknown";
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function severityBadgeClass(severity: string) {
   switch (normalizeSeverity(severity)) {
     case "critical":
-      return "border-red-500/40 bg-red-500/10 text-red-300";
+      return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300";
     case "high":
-      return "border-orange-500/40 bg-orange-500/10 text-orange-300";
+      return "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-300";
     case "medium":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
     case "low":
-      return "border-sky-500/40 bg-sky-500/10 text-sky-300";
+      return "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300";
     default:
       return "border-border bg-muted text-muted-foreground";
   }
@@ -609,11 +627,11 @@ function auditStatusBadgeClass(status: string) {
     case "running":
       return "border-primary/40 bg-primary/10 text-primary";
     case "completed":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
     case "failed":
       return "border-destructive/40 bg-destructive/10 text-destructive";
     case "queued":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
     default:
       return "border-border bg-muted text-muted-foreground";
   }
@@ -622,13 +640,13 @@ function auditStatusBadgeClass(status: string) {
 function pdfStatusBadgeClass(status: string) {
   switch (status) {
     case "completed":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
     case "failed":
       return "border-destructive/40 bg-destructive/10 text-destructive";
     case "running":
       return "border-primary/40 bg-primary/10 text-primary";
     case "queued":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+      return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
     default:
       return "border-border bg-muted text-muted-foreground";
   }
@@ -1012,6 +1030,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     projectName,
     initialRevisionId,
     initialAuditId,
+    initialWorkingCopyId,
     modelAllowlist,
   } = props;
   const router = useRouter();
@@ -1028,8 +1047,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const explorerFilterInputRef = useRef<HTMLInputElement | null>(null);
   const [revisionId, setRevisionId] = useState(initialRevisionId);
   const [auditId, setAuditId] = useState(initialAuditId);
-  const [workingCopyId, setWorkingCopyId] = useState<string | null>(null);
-  const [isEditable, setIsEditable] = useState(false);
+  const [workingCopyId, setWorkingCopyId] = useState<string | null>(
+    initialWorkingCopyId,
+  );
+  const [isEditable, setIsEditable] = useState(Boolean(initialWorkingCopyId));
   const [isBusy, setIsBusy] = useState(false);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -1040,9 +1061,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     Record<string, WorkbenchFileEntry>
   >({});
   const [findings, setFindings] = useState<AuditFindingInstance[]>([]);
-  const [rightPanelTab, setRightPanelTab] = useState<
-    "findings" | "audit-history"
-  >("findings");
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("findings");
   const [auditHistory, setAuditHistory] = useState<AuditHistoryItem[]>([]);
   const [isAuditHistoryLoading, setIsAuditHistoryLoading] = useState(false);
   const [fromCompareAuditId, setFromCompareAuditId] = useState("");
@@ -1097,6 +1116,8 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const staleBackendWarningShownRef = useRef(false);
 
   const uploadInputId = useId();
+  const compareFromSelectId = `${uploadInputId}-compare-from`;
+  const compareToSelectId = `${uploadInputId}-compare-to`;
   const modelStorageKey = `ton-audit:model-selection:${projectId}`;
   const allFiles = useMemo(() => treeFiles(tree), [tree]);
   const expandedDirectorySet = useMemo(
@@ -1229,6 +1250,69 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     () => auditHistory.find((item) => item.id === auditId) ?? null,
     [auditHistory, auditId],
   );
+  const rightPanelStats = useMemo(
+    () => [
+      { id: "findings", label: "Findings", value: findings.length },
+      { id: "audits", label: "Audits", value: auditHistory.length },
+      { id: "tabs", label: "Open tabs", value: openTabs.length },
+    ],
+    [auditHistory.length, findings.length, openTabs.length],
+  );
+  const findingSeveritySummary = useMemo(() => {
+    const counts = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      other: 0,
+    };
+
+    for (const finding of findings) {
+      const severity = normalizeSeverity(
+        finding.payloadJson?.severity ?? finding.severity ?? "",
+      );
+      if (severity === "critical") {
+        counts.critical += 1;
+        continue;
+      }
+      if (severity === "high") {
+        counts.high += 1;
+        continue;
+      }
+      if (severity === "medium") {
+        counts.medium += 1;
+        continue;
+      }
+      if (severity === "low") {
+        counts.low += 1;
+        continue;
+      }
+      counts.other += 1;
+    }
+
+    const summary = [
+      { id: "critical", label: "Critical", count: counts.critical },
+      { id: "high", label: "High", count: counts.high },
+      { id: "medium", label: "Medium", count: counts.medium },
+      { id: "low", label: "Low", count: counts.low },
+    ];
+
+    if (counts.other) {
+      summary.push({ id: "other", label: "Other", count: counts.other });
+    }
+
+    return summary;
+  }, [findings]);
+  const isAuditCompareActionDisabled =
+    isAuditCompareLoading ||
+    !fromCompareAuditId ||
+    !toCompareAuditId ||
+    fromCompareAuditId === toCompareAuditId;
+  const handleRightPanelTabChange = useCallback((nextTab: string) => {
+    if (nextTab === "findings" || nextTab === "audit-history") {
+      setRightPanelTab(nextTab);
+    }
+  }, []);
 
   useEffect(() => {
     fileCacheRef.current = fileCache;
@@ -1280,6 +1364,24 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
   }, []);
 
+  const revealFindingInEditor = useCallback(
+    (finding: AuditFindingInstance) => {
+      const path = finding.payloadJson?.evidence?.filePath;
+      if (path) {
+        openFileInEditor(path);
+      }
+      const line = finding.payloadJson?.evidence?.startLine;
+      if (line && editorRef.current) {
+        editorRef.current.revealLineInCenter(line);
+        editorRef.current.setPosition({
+          lineNumber: line,
+          column: 1,
+        });
+      }
+    },
+    [openFileInEditor],
+  );
+
   const toggleDirectory = useCallback((path: string) => {
     setExpandedDirectories((current) =>
       current.includes(path)
@@ -1310,8 +1412,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
   const loadTree = useCallback(
     async (targetRevisionId: string) => {
+      const sourceUrl = workingCopyId
+        ? `/api/projects/${projectId}/working-copies/${workingCopyId}/tree`
+        : `/api/projects/${projectId}/revisions/${targetRevisionId}/tree`;
       const response = await fetch(
-        `/api/projects/${projectId}/revisions/${targetRevisionId}/tree`,
+        sourceUrl,
         {
           cache: "no-store",
         },
@@ -1325,12 +1430,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setSelectedPath((current) => current ?? firstFile);
       return payload.tree;
     },
-    [projectId],
+    [projectId, workingCopyId],
   );
 
   const loadFile = useCallback(
     async (path: string, options?: { force?: boolean }) => {
-      if (!revisionId) {
+      if (!revisionId && !workingCopyId) {
         return;
       }
       if (!options?.force && fileCacheRef.current[path]) {
@@ -1338,8 +1443,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       const search = new URLSearchParams({ path }).toString();
+      const sourceUrl = workingCopyId
+        ? `/api/projects/${projectId}/working-copies/${workingCopyId}/file?${search}`
+        : `/api/projects/${projectId}/revisions/${revisionId}/file?${search}`;
       const response = await fetch(
-        `/api/projects/${projectId}/revisions/${revisionId}/file?${search}`,
+        sourceUrl,
         {
           cache: "no-store",
         },
@@ -1359,7 +1467,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         },
       }));
     },
-    [projectId, revisionId],
+    [projectId, revisionId, workingCopyId],
   );
 
   const loadAudit = useCallback(
@@ -1540,6 +1648,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     setDirtyPaths([]);
     setSelectedPath(null);
   }, [revisionId]);
+
+  useEffect(() => {
+    setFileCache({});
+    setDirtyPaths([]);
+  }, [workingCopyId]);
 
   useEffect(() => {
     if (!revisionId) {

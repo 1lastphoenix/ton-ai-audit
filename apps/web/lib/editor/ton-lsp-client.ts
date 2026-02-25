@@ -26,6 +26,40 @@ const TOLK_KEYWORDS = [
 
 let monacoVscodeApiInitPromise: Promise<void> | null = null;
 let tolkSyntaxRegistered = false;
+let testGlobalsRegistered = false;
+
+const TEST_GLOBALS_LIB_PATH = "file:///node_modules/@types/vitest-globals/index.d.ts";
+const TEST_GLOBALS_D_TS = `
+type __TonTestFn = () => void | Promise<void>;
+type __TonHookFn = (fn: __TonTestFn, timeout?: number) => void;
+
+type __TonSuite = {
+  (name: string, fn: __TonTestFn): void;
+  skip: (name: string, fn?: __TonTestFn) => void;
+  only: (name: string, fn: __TonTestFn) => void;
+  todo: (name: string) => void;
+  each: (cases: readonly unknown[] | readonly unknown[][]) => (name: string, fn: (...args: unknown[]) => void | Promise<void>) => void;
+};
+
+declare const describe: __TonSuite;
+declare const it: __TonSuite;
+declare const test: __TonSuite;
+declare const beforeEach: __TonHookFn;
+declare const afterEach: __TonHookFn;
+declare const beforeAll: __TonHookFn;
+declare const afterAll: __TonHookFn;
+declare const expect: any;
+declare const vi: any;
+`;
+
+type MonacoTsDefaultsApi = {
+  addExtraLib: (content: string, filePath?: string) => Monaco.IDisposable;
+};
+
+type MonacoTypeScriptApi = {
+  typescriptDefaults: MonacoTsDefaultsApi;
+  javascriptDefaults: MonacoTsDefaultsApi;
+};
 
 export type TonLspStatus = "idle" | "connecting" | "connected" | "disconnected" | "error";
 
@@ -59,6 +93,22 @@ export function registerTonLanguages(monaco: typeof Monaco) {
     if (!monaco.languages.getLanguages().some((language) => language.id === id)) {
       monaco.languages.register({ id });
     }
+  }
+
+  const monacoTypeScriptApi = (monaco.languages as unknown as { typescript?: MonacoTypeScriptApi })
+    .typescript;
+  if (!testGlobalsRegistered && monacoTypeScriptApi) {
+    // Monaco's built-in TS worker does not load project node_modules types,
+    // so provide lightweight vitest-style globals for test files.
+    monacoTypeScriptApi.typescriptDefaults.addExtraLib(
+      TEST_GLOBALS_D_TS,
+      TEST_GLOBALS_LIB_PATH,
+    );
+    monacoTypeScriptApi.javascriptDefaults.addExtraLib(
+      TEST_GLOBALS_D_TS,
+      TEST_GLOBALS_LIB_PATH,
+    );
+    testGlobalsRegistered = true;
   }
 
   if (!tolkSyntaxRegistered) {

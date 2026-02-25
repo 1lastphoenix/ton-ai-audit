@@ -21,7 +21,7 @@ export async function GET(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const latest = await getLatestProjectState(project.id);
+    const latest = await getLatestProjectState(project.id, session.user.id);
 
     return NextResponse.json({
       project,

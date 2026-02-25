@@ -20,6 +20,14 @@ describe("ton workbench actions", () => {
     expect(source).toContain("ensureWorkingCopy");
   });
 
+  it("loads tree and file content from working copy when one is active", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("working-copies/${workingCopyId}/tree");
+    expect(source).toContain("working-copies/${workingCopyId}/file?");
+  });
+
   it("renders vscode-like tabs with close actions and keeps save shortcut in logic", () => {
     const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
     const source = fs.readFileSync(filePath, "utf8");

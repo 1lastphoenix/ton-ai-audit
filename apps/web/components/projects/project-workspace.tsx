@@ -7,6 +7,7 @@ type ProjectWorkspaceProps = {
   projectName: string;
   initialRevisionId: string | null;
   initialAuditId: string | null;
+  initialWorkingCopyId: string | null;
   modelAllowlist: string[];
 };
 
@@ -15,15 +16,17 @@ export function ProjectWorkspace({
   projectName,
   initialRevisionId,
   initialAuditId,
+  initialWorkingCopyId,
   modelAllowlist
 }: ProjectWorkspaceProps) {
   return (
     <TonWorkbench
-      key={`${initialRevisionId ?? "none"}:${initialAuditId ?? "none"}`}
+      key={`${initialRevisionId ?? "none"}:${initialAuditId ?? "none"}:${initialWorkingCopyId ?? "none"}`}
       projectId={projectId}
       projectName={projectName}
       initialRevisionId={initialRevisionId}
       initialAuditId={initialAuditId}
+      initialWorkingCopyId={initialWorkingCopyId}
       modelAllowlist={modelAllowlist}
     />
   );

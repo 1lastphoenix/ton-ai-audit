@@ -22,4 +22,23 @@ describe("working copy file route", () => {
     expect(source).toContain("activeAuditRunId");
     expect(source).toContain("status: 409");
   });
+
+  it("supports reading a working-copy file by path", () => {
+    const routePath = path.resolve(
+      process.cwd(),
+      "app",
+      "api",
+      "projects",
+      "[projectId]",
+      "working-copies",
+      "[workingCopyId]",
+      "file",
+      "route.ts"
+    );
+    const source = fs.readFileSync(routePath, "utf8");
+
+    expect(source).toContain("export async function GET");
+    expect(source).toContain("Missing file path");
+    expect(source).toContain("File not found");
+  });
 });

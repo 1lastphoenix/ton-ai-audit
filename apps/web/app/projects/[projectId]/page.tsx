@@ -22,7 +22,7 @@ export default async function ProjectPage(props: {
     notFound();
   }
 
-  const latest = await getLatestProjectState(project.id);
+  const latest = await getLatestProjectState(project.id, session.user.id);
   const modelAllowlist = await getAuditModelAllowlist();
 
   return (
@@ -33,6 +33,7 @@ export default async function ProjectPage(props: {
           projectName={project.name}
           initialRevisionId={latest.latestRevision?.id ?? null}
           initialAuditId={latest.latestAudit?.id ?? null}
+          initialWorkingCopyId={latest.activeWorkingCopy?.id ?? null}
           modelAllowlist={modelAllowlist}
         />
       </div>

@@ -123,3 +123,56 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .lp-grid-overlay {
+    background-image: linear-gradient(to right, rgba(17, 19, 22, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(17, 19, 22, 0.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent 85%);
+  }
+
+  .lp-reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    animation: lp-reveal 760ms cubic-bezier(0.2, 0.65, 0.2, 1) forwards;
+  }
+
+  .lp-reveal-delay-1 {
+    animation-delay: 160ms;
+  }
+
+  .lp-reveal-delay-2 {
+    animation-delay: 280ms;
+  }
+
+  .lp-float {
+    animation: lp-float 6s ease-in-out infinite;
+  }
+}
+
+@keyframes lp-reveal {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lp-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-reveal,
+  .lp-float {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -464,6 +464,20 @@ export async function createWorkingCopy(params: {
   revisionId: string;
   ownerUserId: string;
 }) {
+  const existingWorkingCopy = await db.query.workingCopies.findFirst({
+    where: and(
+      eq(workingCopies.projectId, params.projectId),
+      eq(workingCopies.baseRevisionId, params.revisionId),
+      eq(workingCopies.ownerUserId, params.ownerUserId),
+      eq(workingCopies.status, "active")
+    ),
+    orderBy: desc(workingCopies.createdAt)
+  });
+
+  if (existingWorkingCopy) {
+    return existingWorkingCopy;
+  }
+
   const [workingCopy] = await db
     .insert(workingCopies)
     .values({
@@ -716,7 +730,7 @@ export async function findActiveAuditRun(projectId: string) {
   });
 }
 
-export async function getLatestProjectState(projectId: string) {
+export async function getLatestProjectState(projectId: string, userId?: string) {
   const [latestRevision] = await db
     .select()
     .from(revisions)
@@ -731,9 +745,27 @@ export async function getLatestProjectState(projectId: string) {
     .orderBy(desc(auditRuns.createdAt))
     .limit(1);
 
+  let activeWorkingCopy: typeof workingCopies.$inferSelect | null = null;
+  if (latestRevision && userId) {
+    [activeWorkingCopy] = await db
+      .select()
+      .from(workingCopies)
+      .where(
+        and(
+          eq(workingCopies.projectId, projectId),
+          eq(workingCopies.ownerUserId, userId),
+          eq(workingCopies.baseRevisionId, latestRevision.id),
+          eq(workingCopies.status, "active")
+        )
+      )
+      .orderBy(desc(workingCopies.createdAt))
+      .limit(1);
+  }
+
   return {
     latestRevision,
-    latestAudit
+    latestAudit,
+    activeWorkingCopy
   };
 }
 
