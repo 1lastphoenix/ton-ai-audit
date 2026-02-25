@@ -23,6 +23,28 @@ type Diagnostic = {
   level: "error" | "warning" | "info";
 };
 
+type SecurityScanAction = "security-rules-scan" | "security-surface-scan";
+
+type SecurityScanDiagnostic = {
+  ruleId: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low" | "informational";
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  snippet: string;
+  remediation: string;
+  confidence: number;
+};
+
+type SecurityScanArtifact = {
+  scanner: SecurityScanAction;
+  status: "completed" | "failed" | "skipped" | "timeout";
+  diagnostics: SecurityScanDiagnostic[];
+  rawSummary: string;
+  parsed: boolean;
+};
+
 type VerifyProgressStepStatus =
   | "pending"
   | "running"
@@ -39,6 +61,11 @@ type VerifyProgressStepPayload = {
   timeoutMs: number;
   durationMs?: number;
 };
+
+const securityScanActions = new Set<SecurityScanAction>([
+  "security-rules-scan",
+  "security-surface-scan"
+]);
 
 function collectDeterministicDiagnostics(files: Awaited<ReturnType<typeof loadRevisionFilesWithContent>>) {
   const diagnostics: Diagnostic[] = [];
@@ -97,6 +124,100 @@ function detectToolchain(files: Awaited<ReturnType<typeof loadRevisionFilesWithC
   return "static";
 }
 
+function normalizeSecuritySeverity(value: unknown): SecurityScanDiagnostic["severity"] {
+  if (
+    value === "critical" ||
+    value === "high" ||
+    value === "medium" ||
+    value === "low" ||
+    value === "informational"
+  ) {
+    return value;
+  }
+
+  return "informational";
+}
+
+function parseSecurityScanDiagnostics(action: SecurityScanAction, stdout: string): SecurityScanArtifact {
+  try {
+    const parsed = JSON.parse(stdout) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Invalid scan JSON payload");
+    }
+
+    const payload = parsed as {
+      summary?: unknown;
+      diagnostics?: unknown;
+    };
+    const diagnostics = Array.isArray(payload.diagnostics) ? payload.diagnostics : [];
+    const normalizedDiagnostics = diagnostics
+      .map((entry): SecurityScanDiagnostic | null => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+
+        const row = entry as Record<string, unknown>;
+        const ruleId = typeof row.ruleId === "string" && row.ruleId.trim() ? row.ruleId.trim() : "UNSPECIFIED";
+        const title =
+          typeof row.title === "string" && row.title.trim() ? row.title.trim() : "Security scan diagnostic";
+        const filePath =
+          typeof row.filePath === "string" && row.filePath.trim() ? row.filePath.trim() : "unknown";
+        const startLine =
+          typeof row.startLine === "number" && Number.isFinite(row.startLine)
+            ? Math.max(1, Math.trunc(row.startLine))
+            : 1;
+        const endLine =
+          typeof row.endLine === "number" && Number.isFinite(row.endLine)
+            ? Math.max(startLine, Math.trunc(row.endLine))
+            : startLine;
+        const snippet =
+          typeof row.snippet === "string" && row.snippet.trim() ? row.snippet.trim() : "No snippet provided";
+        const remediation =
+          typeof row.remediation === "string" && row.remediation.trim()
+            ? row.remediation.trim()
+            : "Review and harden the flagged pattern.";
+        const confidence =
+          typeof row.confidence === "number" && Number.isFinite(row.confidence)
+            ? Math.min(1, Math.max(0, row.confidence))
+            : 0.6;
+
+        return {
+          ruleId,
+          title,
+          severity: normalizeSecuritySeverity(row.severity),
+          filePath,
+          startLine,
+          endLine,
+          snippet,
+          remediation,
+          confidence
+        };
+      })
+      .filter((item): item is SecurityScanDiagnostic => Boolean(item));
+
+    const rawSummary =
+      typeof payload.summary === "string" && payload.summary.trim()
+        ? payload.summary.trim()
+        : `${normalizedDiagnostics.length} diagnostics`;
+
+    return {
+      scanner: action,
+      status: "completed",
+      diagnostics: normalizedDiagnostics,
+      rawSummary,
+      parsed: true
+    };
+  } catch {
+    return {
+      scanner: action,
+      status: "failed",
+      diagnostics: [],
+      rawSummary: "Unable to parse security scan JSON output.",
+      parsed: false
+    };
+  }
+}
+
 export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
   return async function verify(job: Job<JobPayloadMap["verify"]>) {
     const context = {
@@ -150,7 +271,11 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         files.map((file) => ({
           path: file.path,
           content: file.content
-        }))
+        })),
+        job.data.profile
+      );
+      const plannedSecurityScans = plan.steps.filter((step) =>
+        securityScanActions.has(step.action as SecurityScanAction)
       );
       const plannedProgressSteps: VerifyProgressStepPayload[] = plan.steps.map((step) => ({
         id: step.id,
@@ -166,7 +291,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         toolchain,
         sandboxAdapter: plan.adapter,
         sandboxStepCount: plan.steps.length,
-        diagnosticsCount: diagnostics.length
+        diagnosticsCount: diagnostics.length,
+        plannedSecurityScans: plannedSecurityScans.length
       });
 
       await recordJobEvent({
@@ -179,13 +305,17 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           phase: "plan-ready",
           toolchain,
           sandboxAdapter: plan.adapter,
+          profile: job.data.profile,
           totalSteps: plannedProgressSteps.length,
+          securityScans: plannedSecurityScans.map((step) => step.action),
           steps: plannedProgressSteps
         }
       });
 
       let sandboxExecutionSummary = "Sandbox execution skipped";
       let sandboxResults: Awaited<ReturnType<typeof executeSandboxPlan>>["results"] = [];
+      let securityScanArtifacts: SecurityScanArtifact[] = [];
+      let securityScanDiagnostics: SecurityScanDiagnostic[] = [];
 
       if (plan.steps.length > 0) {
         const liveProgressSteps = plannedProgressSteps.map((step) => ({
@@ -213,6 +343,26 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
 
           return mergedStep;
         };
+
+        if (plannedSecurityScans.length > 0) {
+          await recordJobEvent({
+            projectId: job.data.projectId,
+            queue: "verify",
+            jobId: String(job.id),
+            event: "progress",
+            payload: {
+              auditRunId: auditRun.id,
+              phase: "security-scan",
+              status: "started",
+              profile: job.data.profile,
+              scans: plannedSecurityScans.map((step) => ({
+                id: step.id,
+                action: step.action,
+                optional: Boolean(step.optional)
+              }))
+            }
+          });
+        }
 
         workerLogger.info("verify.stage.sandbox-starting", {
           ...context,
@@ -399,10 +549,61 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         });
       }
 
+      const executedSecurityScanResults = sandboxResults.filter((result) =>
+        securityScanActions.has(result.action as SecurityScanAction)
+      );
+      securityScanArtifacts = executedSecurityScanResults.map((result) => {
+        if (!securityScanActions.has(result.action as SecurityScanAction)) {
+          return {
+            scanner: "security-rules-scan",
+            status: "failed",
+            diagnostics: [],
+            rawSummary: "Unexpected scanner action.",
+            parsed: false
+          } satisfies SecurityScanArtifact;
+        }
+
+        const scanArtifact = parseSecurityScanDiagnostics(
+          result.action as SecurityScanAction,
+          result.stdout || "{}"
+        );
+
+        return {
+          ...scanArtifact,
+          status: result.status
+        };
+      });
+      securityScanDiagnostics = securityScanArtifacts.flatMap((artifact) => artifact.diagnostics);
+
+      if (plannedSecurityScans.length > 0) {
+        const missingScans = Math.max(plannedSecurityScans.length - securityScanArtifacts.length, 0);
+        const completedScans = securityScanArtifacts.filter((artifact) => artifact.status === "completed").length;
+        const failedScans =
+          securityScanArtifacts.filter(
+          (artifact) => artifact.status === "failed" || artifact.status === "timeout"
+          ).length + missingScans;
+
+        await recordJobEvent({
+          projectId: job.data.projectId,
+          queue: "verify",
+          jobId: String(job.id),
+          event: "progress",
+          payload: {
+            auditRunId: auditRun.id,
+            phase: "security-scan",
+            status: failedScans > 0 ? "completed_with_failures" : "completed",
+            completedScans,
+            failedScans,
+            diagnostics: securityScanDiagnostics.length
+          }
+        });
+      }
+
       const stdout = [
         `Verification toolchain: ${toolchain}`,
         `Files scanned: ${files.length}`,
         `Diagnostics generated: ${diagnostics.length}`,
+        `Security diagnostics generated: ${securityScanDiagnostics.length}`,
         `Sandbox: ${sandboxExecutionSummary}`
       ].join("\n");
 
@@ -415,6 +616,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       const stderrKey = `verification/${auditRun.id}/stderr.txt`;
       const diagnosticsKey = `verification/${auditRun.id}/diagnostics.json`;
       const sandboxKey = `verification/${auditRun.id}/sandbox-results.json`;
+      const securityScanKey = `verification/${auditRun.id}/security-scans.json`;
+      const securityScanSummaryKey = `verification/${auditRun.id}/security-scan-summary.json`;
 
       await Promise.all([
         putObject({
@@ -436,13 +639,37 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           key: sandboxKey,
           body: JSON.stringify(sandboxResults, null, 2),
           contentType: "application/json"
+        }),
+        putObject({
+          key: securityScanKey,
+          body: JSON.stringify(securityScanArtifacts, null, 2),
+          contentType: "application/json"
+        }),
+        putObject({
+          key: securityScanSummaryKey,
+          body: JSON.stringify(
+            {
+              profile: job.data.profile,
+              plannedScans: plannedSecurityScans.map((step) => step.action),
+              scanCount: securityScanArtifacts.length,
+              diagnostics: securityScanDiagnostics.length,
+              bySeverity: securityScanDiagnostics.reduce<Record<string, number>>((acc, diagnostic) => {
+                acc[diagnostic.severity] = (acc[diagnostic.severity] ?? 0) + 1;
+                return acc;
+              }, {})
+            },
+            null,
+            2
+          ),
+          contentType: "application/json"
         })
       ]);
 
       workerLogger.info("verify.stage.artifacts-persisted", {
         ...context,
         diagnosticsKey,
-        sandboxKey
+        sandboxKey,
+        securityScanKey
       });
 
       const startedAt = new Date();
@@ -458,7 +685,25 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             : "completed",
         stdoutKey,
         stderrKey,
-        summary: `${diagnostics.length} deterministic diagnostics | ${sandboxExecutionSummary}`,
+        summary: `${diagnostics.length} deterministic diagnostics | ${securityScanDiagnostics.length} security diagnostics | artifacts: ${diagnosticsKey}, ${sandboxKey}, ${securityScanKey}`,
+        durationMs: Math.max(Date.now() - startedAt.getTime(), 1)
+      });
+
+      await db.insert(verificationSteps).values({
+        auditRunId: auditRun.id,
+        stepType: "security-scan",
+        toolchain: "sandbox-runner",
+        status:
+          securityScanArtifacts.some(
+            (item) => item.status === "failed" || item.status === "timeout"
+          )
+            ? "failed"
+            : plannedSecurityScans.length > 0
+              ? "completed"
+              : "skipped",
+        stdoutKey: securityScanKey,
+        stderrKey: securityScanSummaryKey,
+        summary: `${securityScanDiagnostics.length} security diagnostics across ${securityScanArtifacts.length} scan(s)`,
         durationMs: Math.max(Date.now() - startedAt.getTime(), 1)
       });
 
@@ -531,7 +776,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
         event: "completed",
         payload: {
           auditRunId: auditRun.id,
-          diagnostics: diagnostics.length
+          diagnostics: diagnostics.length,
+          securityDiagnostics: securityScanDiagnostics.length
         }
       });
 

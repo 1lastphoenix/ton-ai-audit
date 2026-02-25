@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { eq } from "drizzle-orm";
 
-import { findingInstances } from "@ton-audit/shared";
+import { findingInstances, normalizeAuditReport } from "@ton-audit/shared";
 
 import { requireSession, toApiErrorResponse } from "@/lib/server/api";
 import { ensureProjectAccess, findAuditRunWithProject } from "@/lib/server/domain";
@@ -31,10 +31,12 @@ export async function GET(
       .from(findingInstances)
       .where(eq(findingInstances.auditRunId, auditId));
 
+    const normalizedReport = audit.reportJson ? normalizeAuditReport(audit.reportJson) : null;
+
     return NextResponse.json({
       audit,
       findings,
-      report: audit.reportJson
+      report: normalizedReport
     });
   } catch (error) {
     return toApiErrorResponse(error);

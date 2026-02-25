@@ -17,7 +17,9 @@ const sandboxStepActionSchema = z.enum([
   "blueprint-test",
   "tact-check",
   "func-check",
-  "tolk-check"
+  "tolk-check",
+  "security-rules-scan",
+  "security-surface-scan"
 ]) satisfies z.ZodType<SandboxStepAction>;
 
 const sandboxStepSchema = z

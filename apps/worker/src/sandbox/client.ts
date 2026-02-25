@@ -20,7 +20,9 @@ const sandboxStepResultSchema = z.object({
     "blueprint-test",
     "tact-check",
     "func-check",
-    "tolk-check"
+    "tolk-check",
+    "security-rules-scan",
+    "security-surface-scan"
   ]),
   command: z.string(),
   args: z.array(z.string()),

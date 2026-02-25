@@ -1,4 +1,8 @@
-import { detectLanguageFromPath, normalizePath } from "@ton-audit/shared";
+import {
+  detectLanguageFromPath,
+  normalizePath,
+  type AuditProfile
+} from "@ton-audit/shared";
 
 import type {
   SandboxFile,
@@ -9,32 +13,35 @@ import type {
 
 const DEFAULT_BUILD_TIMEOUT_MS = 8 * 60 * 1000;
 const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 3 * 60 * 1000;
+const DEFAULT_SECURITY_TIMEOUT_MS = 2 * 60 * 1000;
 const OPTIONAL_BLUEPRINT_TIMEOUT_MS = 90 * 1000;
 
 function createStep(
   id: string,
   action: SandboxStepAction,
   optional = false,
-  timeoutMs = (() => {
-    if (action === "bootstrap-create-ton") {
-      return DEFAULT_BOOTSTRAP_TIMEOUT_MS;
-    }
-
-    if (
-      optional &&
-      (action === "blueprint-build" || action === "blueprint-test")
-    ) {
-      return OPTIONAL_BLUEPRINT_TIMEOUT_MS;
-    }
-
-    return DEFAULT_BUILD_TIMEOUT_MS;
-  })()
+  timeoutMs?: number
 ): SandboxStep {
+  const resolvedTimeoutMs =
+    timeoutMs ??
+    (() => {
+      if (action === "bootstrap-create-ton") {
+        return DEFAULT_BOOTSTRAP_TIMEOUT_MS;
+      }
+      if (action === "security-rules-scan" || action === "security-surface-scan") {
+        return DEFAULT_SECURITY_TIMEOUT_MS;
+      }
+      if (optional && (action === "blueprint-build" || action === "blueprint-test")) {
+        return OPTIONAL_BLUEPRINT_TIMEOUT_MS;
+      }
+      return DEFAULT_BUILD_TIMEOUT_MS;
+    })()
+
   return {
     id,
     action,
     optional,
-    timeoutMs
+    timeoutMs: resolvedTimeoutMs
   };
 }
 
@@ -124,65 +131,80 @@ function pickSeedTemplate(files: SandboxFile[], languages: string[]): "tact-empt
   return "tact-empty";
 }
 
-function blueprintPlan(languages: string[]): SandboxPlan {
+function blueprintPlan(languages: string[], profile: AuditProfile): SandboxPlan {
+  const isDeep = profile === "deep";
   return {
     adapter: "blueprint",
     languages,
-    reason: "Detected Blueprint project files.",
+    reason: `Detected Blueprint project files (${profile} profile).`,
     bootstrapMode: "none",
     seedTemplate: null,
     unsupportedReasons: [],
     steps: [
       createStep("blueprint-build", "blueprint-build", false),
-      createStep("blueprint-test", "blueprint-test", true)
+      createStep("blueprint-test", "blueprint-test", !isDeep),
+      createStep("security-surface-scan", "security-surface-scan", false),
+      createStep("security-rules-scan", "security-rules-scan", !isDeep)
     ]
   };
 }
 
-function singleLanguagePlan(language: string, files: SandboxFile[]): SandboxPlan {
+function singleLanguagePlan(
+  language: string,
+  files: SandboxFile[],
+  profile: AuditProfile
+): SandboxPlan {
   const seedTemplate = pickSeedTemplate(files, [language]);
+  const isDeep = profile === "deep";
+  const scanSteps = [
+    createStep("security-surface-scan", "security-surface-scan", false),
+    createStep("security-rules-scan", "security-rules-scan", !isDeep)
+  ];
 
   switch (language) {
     case "tact":
       return {
         adapter: "tact",
         languages: [language],
-        reason: "Detected Tact contract files.",
+        reason: `Detected Tact contract files (${profile} profile).`,
         bootstrapMode: "create-ton",
         seedTemplate,
         unsupportedReasons: [],
         steps: [
           createStep("bootstrap", "bootstrap-create-ton", false),
-          createStep("tact-check", "tact-check", true),
-          createStep("blueprint-build", "blueprint-build", false)
+          createStep("tact-check", "tact-check", !isDeep),
+          createStep("blueprint-build", "blueprint-build", false),
+          ...scanSteps
         ]
       };
     case "func":
       return {
         adapter: "func",
         languages: [language],
-        reason: "Detected FunC contract files.",
+        reason: `Detected FunC contract files (${profile} profile).`,
         bootstrapMode: "create-ton",
         seedTemplate,
         unsupportedReasons: [],
         steps: [
           createStep("bootstrap", "bootstrap-create-ton", false),
-          createStep("func-check", "func-check", true),
-          createStep("blueprint-build", "blueprint-build", true)
+          createStep("func-check", "func-check", !isDeep),
+          createStep("blueprint-build", "blueprint-build", true),
+          ...scanSteps
         ]
       };
     case "tolk":
       return {
         adapter: "tolk",
         languages: [language],
-        reason: "Detected Tolk contract files.",
+        reason: `Detected Tolk contract files (${profile} profile).`,
         bootstrapMode: "create-ton",
         seedTemplate,
         unsupportedReasons: [],
         steps: [
           createStep("bootstrap", "bootstrap-create-ton", false),
-          createStep("tolk-check", "tolk-check", true),
-          createStep("blueprint-build", "blueprint-build", true)
+          createStep("tolk-check", "tolk-check", !isDeep),
+          createStep("blueprint-build", "blueprint-build", true),
+          ...scanSteps
         ]
       };
     default:
@@ -198,7 +220,8 @@ function singleLanguagePlan(language: string, files: SandboxFile[]): SandboxPlan
   }
 }
 
-function mixedPlan(files: SandboxFile[], languages: string[]): SandboxPlan {
+function mixedPlan(files: SandboxFile[], languages: string[], profile: AuditProfile): SandboxPlan {
+  const isDeep = profile === "deep";
   const steps: SandboxStep[] = [];
   const unsupportedReasons: string[] = [
     "Mixed-language execution runs with pinned toolchain only; project-specific dependencies are skipped."
@@ -206,20 +229,22 @@ function mixedPlan(files: SandboxFile[], languages: string[]): SandboxPlan {
 
   steps.push(createStep("bootstrap", "bootstrap-create-ton", false));
   if (languages.includes("tact")) {
-    steps.push(createStep("tact-check", "tact-check", true));
+    steps.push(createStep("tact-check", "tact-check", !isDeep));
   }
   if (languages.includes("func")) {
-    steps.push(createStep("func-check", "func-check", true));
+    steps.push(createStep("func-check", "func-check", !isDeep));
   }
   if (languages.includes("tolk")) {
-    steps.push(createStep("tolk-check", "tolk-check", true));
+    steps.push(createStep("tolk-check", "tolk-check", !isDeep));
   }
   steps.push(createStep("blueprint-build", "blueprint-build", true));
+  steps.push(createStep("security-surface-scan", "security-surface-scan", false));
+  steps.push(createStep("security-rules-scan", "security-rules-scan", !isDeep));
 
   return {
     adapter: "mixed",
     languages,
-    reason: "Detected mixed TON language set without Blueprint metadata.",
+    reason: `Detected mixed TON language set without Blueprint metadata (${profile} profile).`,
     bootstrapMode: "create-ton",
     seedTemplate: pickSeedTemplate(files, languages),
     unsupportedReasons,
@@ -227,7 +252,10 @@ function mixedPlan(files: SandboxFile[], languages: string[]): SandboxPlan {
   };
 }
 
-export function planSandboxVerification(files: SandboxFile[]): SandboxPlan {
+export function planSandboxVerification(
+  files: SandboxFile[],
+  profile: AuditProfile = "deep"
+): SandboxPlan {
   const normalized = files.map((file) => ({
     path: normalizePath(file.path),
     content: file.content
@@ -247,12 +275,12 @@ export function planSandboxVerification(files: SandboxFile[]): SandboxPlan {
   }
 
   if (looksLikeBlueprint(normalized)) {
-    return blueprintPlan(languages);
+    return blueprintPlan(languages, profile);
   }
 
   if (languages.length === 1) {
-    return singleLanguagePlan(languages[0]!, normalized);
+    return singleLanguagePlan(languages[0]!, normalized, profile);
   }
 
-  return mixedPlan(normalized, languages);
+  return mixedPlan(normalized, languages, profile);
 }

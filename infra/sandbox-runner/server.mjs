@@ -22,7 +22,9 @@ const allowedActions = new Set([
   "blueprint-test",
   "tact-check",
   "func-check",
-  "tolk-check"
+  "tolk-check",
+  "security-rules-scan",
+  "security-surface-scan"
 ]);
 
 const bootstrapTemplates = new Set(["tact-empty", "tolk-empty", "func-empty"]);
@@ -32,7 +34,15 @@ const actionCommandMap = {
   "blueprint-test": { command: "blueprint", args: ["test"] },
   "tact-check": { command: "tact", args: ["--version"] },
   "func-check": { command: "func-js", args: ["--version"] },
-  "tolk-check": { command: "tolk-js", args: ["--help"] }
+  "tolk-check": { command: "tolk-js", args: ["--help"] },
+  "security-rules-scan": {
+    command: "node",
+    args: ["scripts/security-rules-scan.mjs"]
+  },
+  "security-surface-scan": {
+    command: "node",
+    args: ["scripts/security-surface-scan.mjs"]
+  }
 };
 
 function terminateProcessTree(pid, signal) {

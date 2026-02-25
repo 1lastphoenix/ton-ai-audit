@@ -318,6 +318,7 @@ function renderReportHtml(params: {
   </section>
 
   ${internalAppendix}
+  <footer class="section muted">audit.circulo.cloud</footer>
 </body>
 </html>`;
 }
@@ -396,6 +397,20 @@ export function createPdfProcessor() {
         }
       });
 
+      await recordJobEvent({
+        projectId: job.data.projectId,
+        queue: "pdf",
+        jobId: String(job.id),
+        event: "progress",
+        payload: {
+          auditRunId: auditRun.id,
+          phase: "pdf-render",
+          status: "started",
+          variant,
+          findingCount: findings.length
+        }
+      });
+
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle" });
@@ -420,6 +435,20 @@ export function createPdfProcessor() {
         key: s3Key,
         body: pdfBuffer,
         contentType: "application/pdf"
+      });
+
+      await recordJobEvent({
+        projectId: job.data.projectId,
+        queue: "pdf",
+        jobId: String(job.id),
+        event: "progress",
+        payload: {
+          auditRunId: auditRun.id,
+          phase: "pdf-render",
+          status: "completed",
+          variant,
+          s3Key
+        }
       });
 
       await db
@@ -452,6 +481,20 @@ export function createPdfProcessor() {
         .where(
           and(eq(pdfExports.auditRunId, job.data.auditRunId), eq(pdfExports.variant, variant))
         );
+
+      await recordJobEvent({
+        projectId: job.data.projectId,
+        queue: "pdf",
+        jobId: String(job.id),
+        event: "progress",
+        payload: {
+          auditRunId: job.data.auditRunId,
+          phase: "pdf-render",
+          status: "failed",
+          variant,
+          message: error instanceof Error ? error.message : "Unknown pdf render error"
+        }
+      });
 
       throw error;
     } finally {

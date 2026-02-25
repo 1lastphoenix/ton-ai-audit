@@ -9,7 +9,9 @@ export type SandboxStepAction =
   | "blueprint-test"
   | "tact-check"
   | "func-check"
-  | "tolk-check";
+  | "tolk-check"
+  | "security-rules-scan"
+  | "security-surface-scan";
 
 export type SandboxStep = {
   id: string;

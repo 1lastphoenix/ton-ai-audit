@@ -59,12 +59,16 @@ async function findInFlightPdfJob(
 
   return (
     jobs.find((job) => {
-      const payload = job.data as { projectId?: unknown; auditRunId?: unknown; variant?: unknown };
+      const payload = job.data as {
+        projectId?: unknown;
+        auditRunId?: unknown;
+        variant?: unknown;
+      };
       const jobVariant =
         typeof payload.variant === "string" ? payload.variant : "client";
       return (
-        payload.projectId === projectId &&
-        payload.auditRunId === auditRunId &&
+        job.data.projectId === projectId &&
+        job.data.auditRunId === auditRunId &&
         jobVariant === variant
       );
     }) ?? null

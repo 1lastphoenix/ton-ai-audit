@@ -7,6 +7,7 @@ RUN apk add --no-cache bash git docker-cli
 COPY package.json ./
 COPY server.mjs ./
 COPY pinned-toolchain.json ./
+COPY scripts ./scripts
 
 RUN npm install --omit=dev \
   && npm install -g \

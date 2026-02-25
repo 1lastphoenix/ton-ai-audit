@@ -101,7 +101,29 @@ type FindingPayload = {
   title: string;
   severity: string;
   summary: string;
+  impact?: string;
+  likelihood?: string;
+  exploitPath?: string;
+  confidence?: number;
   remediation: string;
+  taxonomy?: Array<{
+    standard: "owasp-sc" | "cwe" | "swc";
+    id: string;
+    title?: string;
+  }>;
+  cvssV31?: {
+    vector: string;
+    baseScore: number;
+    severity?: "none" | "low" | "medium" | "high" | "critical";
+  };
+  preconditions?: string[];
+  attackScenario?: string;
+  affectedContracts?: string[];
+  exploitability?: string;
+  businessImpact?: string;
+  technicalImpact?: string;
+  fixPriority?: "p0" | "p1" | "p2" | "p3";
+  verificationPlan?: string[];
   evidence: {
     filePath: string;
     startLine: number;
@@ -116,6 +138,15 @@ type AuditFindingInstance = {
   severity: string;
 };
 
+type PdfExportStatus =
+  | "not_requested"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+type PdfExportVariant = "client" | "internal";
+
 type AuditHistoryItem = {
   id: string;
   revisionId: string;
@@ -125,10 +156,14 @@ type AuditHistoryItem = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  profile: "fast" | "deep";
+  engineVersion: string;
+  reportSchemaVersion: number;
   primaryModelId: string;
   fallbackModelId: string;
   findingCount: number;
-  pdfStatus: "not_requested" | "queued" | "running" | "completed" | "failed";
+  pdfStatus: PdfExportStatus;
+  pdfStatusByVariant: Record<PdfExportVariant, PdfExportStatus>;
 };
 
 type AuditCompareItem = {
@@ -216,6 +251,7 @@ type VerifyProgressStep = {
 
 type VerifyProgressPhase =
   | "idle"
+  | "security-scan"
   | "plan-ready"
   | "sandbox-running"
   | "sandbox-completed"
@@ -686,6 +722,21 @@ function pdfStatusBadgeClass(status: string) {
   }
 }
 
+function toProfileLabel(profile: string) {
+  return profile === "fast" ? "FAST" : "DEEP";
+}
+
+function toPdfVariantLabel(variant: PdfExportVariant) {
+  return variant === "internal" ? "Internal" : "Client";
+}
+
+function resolveAuditPdfStatus(
+  audit: Pick<AuditHistoryItem, "pdfStatus" | "pdfStatusByVariant">,
+  variant: PdfExportVariant
+) {
+  return audit.pdfStatusByVariant?.[variant] ?? audit.pdfStatus;
+}
+
 function canExportAuditPdf(auditStatus?: string | null, pdfStatus?: string | null) {
   return auditStatus === "completed" || pdfStatus === "completed";
 }
@@ -804,6 +855,8 @@ function verifyStepStatusClass(status: VerifyProgressStepStatus) {
 
 function verifyProgressPhaseLabel(phase: VerifyProgressPhase) {
   switch (phase) {
+    case "security-scan":
+      return "Security Scan";
     case "plan-ready":
       return "Plan Ready";
     case "sandbox-running":
@@ -1119,6 +1172,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       normalizedModelAllowlist[0] ??
       DEFAULT_MODEL_ID,
   );
+  const [auditProfile, setAuditProfile] = useState<"fast" | "deep">("deep");
   const [jobState, setJobState] = useState<string>("idle");
   const [auditStatus, setAuditStatus] = useState<string>("idle");
   const [lspStatus, setLspStatus] = useState<TonLspStatus>("idle");
@@ -1593,7 +1647,25 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       const payload = (await response.json()) as {
         audits?: AuditHistoryItem[];
       };
-      const nextHistory = payload.audits ?? [];
+      const nextHistory = (payload.audits ?? []).map((item) => {
+        const fallbackPdfStatus = item.pdfStatus ?? "not_requested";
+        return {
+          ...item,
+          profile: item.profile === "fast" ? "fast" : "deep",
+          engineVersion: item.engineVersion ?? "legacy-engine",
+          reportSchemaVersion:
+            typeof item.reportSchemaVersion === "number" &&
+            Number.isFinite(item.reportSchemaVersion)
+              ? item.reportSchemaVersion
+              : 1,
+          pdfStatusByVariant: {
+            client: item.pdfStatusByVariant?.client ?? fallbackPdfStatus,
+            internal:
+              item.pdfStatusByVariant?.internal ??
+              (item.pdfStatusByVariant?.client ?? "not_requested")
+          }
+        } satisfies AuditHistoryItem;
+      });
       setAuditHistory(nextHistory);
 
       const completed = nextHistory.filter(
@@ -1872,6 +1944,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 totalSteps ?? Math.max(nextSteps.length, current.totalSteps);
               let nextPhase: VerifyProgressPhase = current.phase;
               if (
+                phase === "security-scan" ||
                 phase === "plan-ready" ||
                 phase === "sandbox-running" ||
                 phase === "sandbox-completed" ||
@@ -1913,6 +1986,21 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 totalSteps && totalSteps > 0
                   ? `Verification plan ready: ${totalSteps} sandbox step(s).`
                   : "Verification plan ready: static checks only.",
+              );
+            } else if (phase === "security-scan") {
+              const scanStatus =
+                typeof verifyPayload.status === "string"
+                  ? verifyPayload.status
+                  : "running";
+              const scanDiagnostics =
+                typeof verifyPayload.diagnostics === "number" &&
+                Number.isFinite(verifyPayload.diagnostics)
+                  ? Math.max(0, Math.trunc(verifyPayload.diagnostics))
+                  : null;
+              setActivityMessage(
+                scanStatus.startsWith("completed")
+                  ? `Security scans completed${scanDiagnostics !== null ? `: ${scanDiagnostics} diagnostic(s).` : "."}`
+                  : "Security scans running.",
               );
             } else if (phase === "sandbox-running") {
               const runningStep =
@@ -2251,6 +2339,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       const parsed = JSON.parse(persisted) as {
         primaryModelId?: string;
         fallbackModelId?: string;
+        auditProfile?: string;
       };
 
       if (
@@ -2265,6 +2354,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       ) {
         setFallbackModelId(parsed.fallbackModelId);
       }
+      if (parsed.auditProfile === "fast" || parsed.auditProfile === "deep") {
+        setAuditProfile(parsed.auditProfile);
+      }
     } catch {
       window.localStorage.removeItem(modelStorageKey);
     }
@@ -2276,9 +2368,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       JSON.stringify({
         primaryModelId,
         fallbackModelId,
+        auditProfile,
       }),
     );
-  }, [fallbackModelId, modelStorageKey, primaryModelId]);
+  }, [auditProfile, fallbackModelId, modelStorageKey, primaryModelId]);
 
   useEffect(() => {
     return () => {
@@ -2632,8 +2725,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     setIsBusy(true);
     setJobState("queuing");
     setLastError(null);
-    setActivityMessage("Queueing audit run...");
-    pushWorkbenchLog("info", "Queueing audit run from current working copy.");
+    setActivityMessage(`Queueing ${auditProfile.toUpperCase()} audit run...`);
+    pushWorkbenchLog(
+      "info",
+      `Queueing ${auditProfile.toUpperCase()} audit run from current working copy.`,
+    );
 
     try {
       const activeWorkingCopyId =
@@ -2664,6 +2760,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           body: JSON.stringify({
             primaryModelId,
             fallbackModelId,
+            profile: auditProfile,
             includeDocsFallbackFetch: true,
           }),
         },
@@ -2701,7 +2798,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       setActivityMessage(`Audit ${shortId(payload.auditRun.id)} queued.`);
       pushWorkbenchLog(
         "info",
-        `Audit ${shortId(payload.auditRun.id)} queued for revision ${shortId(payload.revision.id)}.`,
+        `${auditProfile.toUpperCase()} audit ${shortId(payload.auditRun.id)} queued for revision ${shortId(payload.revision.id)}.`,
       );
       loadAuditHistory().catch(() => undefined);
     } catch (error) {
@@ -2715,17 +2812,23 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
   }
 
-  async function exportPdfForAudit(targetAuditId: string) {
+  async function exportPdfForAudit(
+    targetAuditId: string,
+    variant: PdfExportVariant = "client",
+  ) {
     if (!targetAuditId) {
       return;
     }
 
     const targetAudit = auditHistory.find((item) => item.id === targetAuditId);
+    const targetVariantStatus = targetAudit
+      ? resolveAuditPdfStatus(targetAudit, variant)
+      : null;
     const isCompleted =
       targetAudit?.status === "completed" ||
       (targetAuditId === auditId && auditStatus === "completed");
     const canExport =
-      canExportAuditPdf(targetAudit?.status, targetAudit?.pdfStatus) ||
+      canExportAuditPdf(targetAudit?.status, targetVariantStatus) ||
       (targetAuditId === auditId && canExportAuditPdf(auditStatus, null));
     if (!canExport) {
       const message = "PDF export is available after the audit completes.";
@@ -2737,14 +2840,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     setIsBusy(true);
     setLastError(null);
-    setActivityMessage("Preparing PDF export...");
+    setActivityMessage(`Preparing ${toPdfVariantLabel(variant)} PDF export...`);
     pushWorkbenchLog(
       "info",
-      `Preparing PDF export for audit ${shortId(targetAuditId)}.`,
+      `Preparing ${toPdfVariantLabel(variant)} PDF export for audit ${shortId(targetAuditId)}.`,
     );
     try {
+      const search = new URLSearchParams({ variant }).toString();
       const existingStatusResponse = await fetch(
-        `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
+        `/api/projects/${projectId}/audits/${targetAuditId}/pdf?${search}`,
         {
           cache: "no-store",
         },
@@ -2756,10 +2860,12 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         };
         if (existingStatusPayload.url) {
           window.open(existingStatusPayload.url, "_blank", "noopener,noreferrer");
-          setActivityMessage("PDF is ready and opened in a new tab.");
+          setActivityMessage(
+            `${toPdfVariantLabel(variant)} PDF is ready and opened in a new tab.`,
+          );
           pushWorkbenchLog(
             "info",
-            `Opened existing PDF for audit ${shortId(targetAuditId)}.`,
+            `Opened existing ${toPdfVariantLabel(variant)} PDF for audit ${shortId(targetAuditId)}.`,
           );
           return;
         }
@@ -2771,15 +2877,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         );
       }
 
-      setActivityMessage("Queueing PDF export...");
+      setActivityMessage(`Queueing ${toPdfVariantLabel(variant)} PDF export...`);
       pushWorkbenchLog(
         "info",
-        `Queueing PDF export for audit ${shortId(targetAuditId)}.`,
+        `Queueing ${toPdfVariantLabel(variant)} PDF export for audit ${shortId(targetAuditId)}.`,
       );
       const start = await fetch(
         `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ variant }),
         },
       );
       if (!start.ok) {
@@ -2798,7 +2908,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const statusResponse = await fetch(
-          `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
+          `/api/projects/${projectId}/audits/${targetAuditId}/pdf?${search}`,
           {
             cache: "no-store",
           },
@@ -2823,7 +2933,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         if (statusPayload.status === "failed") {
-          throw new Error("PDF generation failed on the worker.");
+          throw new Error(
+            `${toPdfVariantLabel(variant)} PDF generation failed on the worker.`,
+          );
         }
       }
 
@@ -2836,18 +2948,24 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       window.open(url, "_blank", "noopener,noreferrer");
-      setActivityMessage("PDF is ready and opened in a new tab.");
+      setActivityMessage(
+        `${toPdfVariantLabel(variant)} PDF is ready and opened in a new tab.`,
+      );
       pushWorkbenchLog(
         "info",
-        `PDF export for audit ${shortId(targetAuditId)} completed.`,
+        `${toPdfVariantLabel(variant)} PDF export for audit ${shortId(targetAuditId)} completed.`,
       );
     } catch (error) {
       setLastError(
-        error instanceof Error ? error.message : "PDF export failed",
+        error instanceof Error
+          ? error.message
+          : `${toPdfVariantLabel(variant)} PDF export failed`,
       );
       pushWorkbenchLog(
         "error",
-        error instanceof Error ? error.message : "PDF export failed",
+        error instanceof Error
+          ? error.message
+          : `${toPdfVariantLabel(variant)} PDF export failed`,
       );
     } finally {
       loadAuditHistory().catch(() => undefined);
@@ -3468,7 +3586,27 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                     </Button>
                   </WorkbenchTooltip>
 
-                  <WorkbenchTooltip content="Run Audit">
+                  <Select
+                    value={auditProfile}
+                    onValueChange={(value) => {
+                      if (value === "fast" || value === "deep") {
+                        setAuditProfile(value);
+                      }
+                    }}
+                    disabled={isAuditWriteLocked || isBusy}
+                  >
+                    <SelectTrigger className="h-6 w-[80px] rounded-sm px-2 text-[10px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="deep">Deep</SelectItem>
+                      <SelectItem value="fast">Fast</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <WorkbenchTooltip
+                    content={`Run ${toProfileLabel(auditProfile)} Audit`}
+                  >
                     <Button
                       type="button"
                       size="icon-sm"
@@ -3482,7 +3620,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                     </Button>
                   </WorkbenchTooltip>
 
-                  <WorkbenchTooltip content="Export PDF">
+                  <WorkbenchTooltip content="Export Client PDF">
                     <Button
                       type="button"
                       size="icon-sm"
@@ -3494,7 +3632,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         (activeAuditHistoryItem
                           ? !canExportAuditPdf(
                               activeAuditHistoryItem.status,
-                              activeAuditHistoryItem.pdfStatus,
+                              resolveAuditPdfStatus(
+                                activeAuditHistoryItem,
+                                "client",
+                              ),
                             )
                           : auditStatus !== "completed")
                       }
@@ -3596,6 +3737,28 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                           onValueChange={selector.onValueChange}
                         />
                       ))}
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          Audit profile ({toProfileLabel(auditProfile)})
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          <DropdownMenuRadioGroup
+                            value={auditProfile}
+                            onValueChange={(value) => {
+                              if (value === "fast" || value === "deep") {
+                                setAuditProfile(value);
+                              }
+                            }}
+                          >
+                            <DropdownMenuRadioItem value="deep">
+                              Deep (recommended)
+                            </DropdownMenuRadioItem>
+                            <DropdownMenuRadioItem value="fast">
+                              Fast
+                            </DropdownMenuRadioItem>
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
                       <DropdownMenuSeparator />
                       <DropdownMenuLabel className="text-[11px]">
                         rev {shortId(revisionId)} · audit {shortId(auditId)} ·
@@ -3942,6 +4105,17 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                             const summary = item.payloadJson?.summary;
                             const filePath = item.payloadJson?.evidence?.filePath;
                             const line = item.payloadJson?.evidence?.startLine;
+                            const taxonomy = item.payloadJson?.taxonomy ?? [];
+                            const cvss = item.payloadJson?.cvssV31;
+                            const confidence =
+                              typeof item.payloadJson?.confidence === "number"
+                                ? `${Math.round(item.payloadJson.confidence * 100)}%`
+                                : null;
+                            const fixPriority =
+                              item.payloadJson?.fixPriority?.toUpperCase() ?? null;
+                            const remediation = item.payloadJson?.remediation;
+                            const businessImpact = item.payloadJson?.businessImpact;
+                            const technicalImpact = item.payloadJson?.technicalImpact;
 
                             return (
                               <Button
@@ -3977,6 +4151,47 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                   {summary ? (
                                     <div className="text-muted-foreground mt-1 line-clamp-2 break-words text-[11px] leading-4">
                                       {summary}
+                                    </div>
+                                  ) : null}
+                                  <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-1 text-[10px]">
+                                    {cvss?.baseScore !== undefined ? (
+                                      <span className="rounded border border-border px-1.5 py-0.5">
+                                        CVSS {cvss.baseScore.toFixed(1)}
+                                      </span>
+                                    ) : null}
+                                    {confidence ? (
+                                      <span className="rounded border border-border px-1.5 py-0.5">
+                                        Confidence {confidence}
+                                      </span>
+                                    ) : null}
+                                    {fixPriority ? (
+                                      <span className="rounded border border-border px-1.5 py-0.5">
+                                        {fixPriority}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {taxonomy.length ? (
+                                    <div className="mt-1.5 flex flex-wrap gap-1">
+                                      {taxonomy.slice(0, 4).map((tag) => (
+                                        <span
+                                          key={`${item.id}-${tag.standard}-${tag.id}`}
+                                          className="text-muted-foreground rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px]"
+                                        >
+                                          {tag.standard.toUpperCase()} {tag.id}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  {businessImpact || technicalImpact ? (
+                                    <div className="text-muted-foreground mt-1.5 line-clamp-2 text-[10px] leading-4">
+                                      {businessImpact ? `Business: ${businessImpact}` : ""}
+                                      {businessImpact && technicalImpact ? " | " : ""}
+                                      {technicalImpact ? `Technical: ${technicalImpact}` : ""}
+                                    </div>
+                                  ) : null}
+                                  {remediation ? (
+                                    <div className="text-muted-foreground mt-1.5 line-clamp-2 text-[10px] leading-4">
+                                      Fix: {remediation}
                                     </div>
                                   ) : null}
                                 </div>
@@ -4275,19 +4490,44 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                     >
                                       {toAuditStatusLabel(item.status)}
                                     </Badge>
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "h-5 border px-1.5 text-[10px] font-medium",
-                                        pdfStatusBadgeClass(item.pdfStatus),
+                                    <div className="flex items-center gap-1">
+                                      {(["client", "internal"] as const).map(
+                                        (variant) => {
+                                          const variantStatus = resolveAuditPdfStatus(
+                                            item,
+                                            variant,
+                                          );
+                                          return (
+                                            <Badge
+                                              key={`${item.id}-${variant}`}
+                                              variant="outline"
+                                              className={cn(
+                                                "h-5 border px-1.5 text-[10px] font-medium",
+                                                pdfStatusBadgeClass(variantStatus),
+                                              )}
+                                            >
+                                              {variant === "client" ? "C" : "I"}{" "}
+                                              {toPdfStatusLabel(variantStatus)}
+                                            </Badge>
+                                          );
+                                        },
                                       )}
-                                    >
-                                      PDF {toPdfStatusLabel(item.pdfStatus)}
-                                    </Badge>
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="text-muted-foreground mt-1.5 text-[11px]">
                                   findings {item.findingCount} · {item.primaryModelId}
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                    {toProfileLabel(item.profile ?? "deep")}
+                                  </Badge>
+                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                    {item.engineVersion ?? "legacy-engine"}
+                                  </Badge>
+                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                    schema v{item.reportSchemaVersion ?? 1}
+                                  </Badge>
                                 </div>
                                 <div className="mt-2 flex items-center gap-1.5">
                                   <Button
@@ -4307,14 +4547,35 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                     variant="outline"
                                     className="h-7 px-2 text-[11px]"
                                     disabled={
-                                      !canExportAuditPdf(item.status, item.pdfStatus) ||
+                                      !canExportAuditPdf(
+                                        item.status,
+                                        resolveAuditPdfStatus(item, "client"),
+                                      ) ||
                                       isBusy
                                     }
                                     onClick={() => {
                                       void exportPdfForAudit(item.id);
                                     }}
                                   >
-                                    Export PDF
+                                    Client PDF
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-[11px]"
+                                    disabled={
+                                      !canExportAuditPdf(
+                                        item.status,
+                                        resolveAuditPdfStatus(item, "internal"),
+                                      ) ||
+                                      isBusy
+                                    }
+                                    onClick={() => {
+                                      void exportPdfForAudit(item.id, "internal");
+                                    }}
+                                  >
+                                    Internal PDF
                                   </Button>
                                 </div>
                               </div>
