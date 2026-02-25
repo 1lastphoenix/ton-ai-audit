@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { auditProfileSchema, pdfExportVariantSchema } from "./enums";
+
 export const ingestJobPayloadSchema = z.object({
   projectId: z.string().uuid(),
   revisionId: z.string().uuid(),
@@ -11,6 +13,7 @@ export const verifyJobPayloadSchema = z.object({
   projectId: z.string().uuid(),
   revisionId: z.string().uuid(),
   auditRunId: z.string().uuid(),
+  profile: auditProfileSchema.default("deep"),
   includeDocsFallbackFetch: z.boolean().default(true)
 });
 
@@ -18,6 +21,7 @@ export const auditJobPayloadSchema = z.object({
   projectId: z.string().uuid(),
   revisionId: z.string().uuid(),
   auditRunId: z.string().uuid(),
+  profile: auditProfileSchema.default("deep"),
   includeDocsFallbackFetch: z.boolean().default(true)
 });
 
@@ -30,6 +34,7 @@ export const findingLifecycleJobPayloadSchema = z.object({
 export const pdfJobPayloadSchema = z.object({
   projectId: z.string().uuid(),
   auditRunId: z.string().uuid(),
+  variant: pdfExportVariantSchema.default("client"),
   requestedByUserId: z.string().min(1)
 });
 

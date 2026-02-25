@@ -57,7 +57,8 @@ export async function POST(
       workingCopyId,
       userId: session.user.id,
       primaryModelId: body.primaryModelId,
-      fallbackModelId: body.fallbackModelId
+      fallbackModelId: body.fallbackModelId,
+      profile: body.profile
     });
 
     const verifyJob = await enqueueJob(
@@ -66,6 +67,7 @@ export async function POST(
         projectId,
         revisionId: revision.id,
         auditRunId: auditRun.id,
+        profile: body.profile,
         includeDocsFallbackFetch: body.includeDocsFallbackFetch
       },
       `verify:${projectId}:${auditRun.id}`

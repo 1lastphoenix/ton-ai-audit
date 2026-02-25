@@ -14,7 +14,9 @@ import {
   detectLanguageFromPath,
   normalizePath,
   projectLifecycleStateSchema,
+  type AuditProfile,
   type PdfExportStatus,
+  type PdfExportVariant,
   type RevisionSource,
   type Language,
   type ProjectLifecycleState,
@@ -578,6 +580,7 @@ export async function snapshotWorkingCopyAndCreateAuditRun(params: {
   userId: string;
   primaryModelId: string;
   fallbackModelId: string;
+  profile: AuditProfile;
 }) {
   const workingCopy = await db.query.workingCopies.findFirst({
     where: and(
@@ -641,8 +644,11 @@ export async function snapshotWorkingCopyAndCreateAuditRun(params: {
       revisionId: revision.id,
       status: "queued",
       requestedByUserId: params.userId,
+      profile: params.profile,
       primaryModelId: params.primaryModelId,
-      fallbackModelId: params.fallbackModelId
+      fallbackModelId: params.fallbackModelId,
+      engineVersion: "ton-audit-pro-v2",
+      reportSchemaVersion: 2
     })
     .returning();
 
@@ -778,6 +784,7 @@ export async function queryProjectAudits(projectId: string) {
 }
 
 type AuditHistoryPdfStatus = PdfExportStatus | "not_requested";
+type AuditHistoryPdfStatusByVariant = Record<PdfExportVariant, AuditHistoryPdfStatus>;
 
 export type AuditHistoryItem = {
   id: string;
@@ -788,10 +795,14 @@ export type AuditHistoryItem = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  profile: AuditProfile;
+  engineVersion: string;
+  reportSchemaVersion: number;
   primaryModelId: string;
   fallbackModelId: string;
   findingCount: number;
   pdfStatus: AuditHistoryPdfStatus;
+  pdfStatusByVariant: AuditHistoryPdfStatusByVariant;
 };
 
 type ComparisonFindingSummary = {
@@ -936,6 +947,7 @@ export async function queryProjectAuditHistory(projectId: string): Promise<Audit
     db
       .select({
         auditRunId: pdfExports.auditRunId,
+        variant: pdfExports.variant,
         status: pdfExports.status
       })
       .from(pdfExports)
@@ -948,7 +960,16 @@ export async function queryProjectAuditHistory(projectId: string): Promise<Audit
   const findingCountByAuditId = new Map(
     findingCountRows.map((row) => [row.auditRunId, Number(row.count) || 0])
   );
-  const pdfStatusByAuditId = new Map(pdfRows.map((row) => [row.auditRunId, row.status]));
+  const emptyPdfStatus = (): AuditHistoryPdfStatusByVariant => ({
+    client: "not_requested",
+    internal: "not_requested"
+  });
+  const pdfStatusByAuditId = new Map<string, AuditHistoryPdfStatusByVariant>();
+  for (const row of pdfRows) {
+    const current = pdfStatusByAuditId.get(row.auditRunId) ?? emptyPdfStatus();
+    current[row.variant] = row.status;
+    pdfStatusByAuditId.set(row.auditRunId, current);
+  }
 
   return audits.map((audit) => {
     const revisionMeta = revisionById.get(audit.revisionId);
@@ -962,10 +983,14 @@ export async function queryProjectAuditHistory(projectId: string): Promise<Audit
       createdAt: toIsoString(audit.createdAt) ?? new Date(0).toISOString(),
       startedAt: toIsoString(audit.startedAt),
       finishedAt: toIsoString(audit.finishedAt),
+      profile: audit.profile,
+      engineVersion: audit.engineVersion,
+      reportSchemaVersion: audit.reportSchemaVersion,
       primaryModelId: audit.primaryModelId,
       fallbackModelId: audit.fallbackModelId,
       findingCount: findingCountByAuditId.get(audit.id) ?? 0,
-      pdfStatus: pdfStatusByAuditId.get(audit.id) ?? "not_requested"
+      pdfStatus: (pdfStatusByAuditId.get(audit.id) ?? emptyPdfStatus()).client,
+      pdfStatusByVariant: pdfStatusByAuditId.get(audit.id) ?? emptyPdfStatus()
     };
   });
 }
@@ -1127,15 +1152,16 @@ export async function getAuditComparison(params: {
   };
 }
 
-export async function createPdfExport(auditRunId: string) {
+export async function createPdfExport(auditRunId: string, variant: PdfExportVariant = "client") {
   const [record] = await db
     .insert(pdfExports)
     .values({
       auditRunId,
+      variant,
       status: "queued"
     })
     .onConflictDoUpdate({
-      target: pdfExports.auditRunId,
+      target: [pdfExports.auditRunId, pdfExports.variant],
       set: {
         status: "queued",
         s3Key: null,
@@ -1149,8 +1175,11 @@ export async function createPdfExport(auditRunId: string) {
   return record;
 }
 
-export async function getPdfExportByAudit(auditRunId: string) {
+export async function getPdfExportByAudit(
+  auditRunId: string,
+  variant: PdfExportVariant = "client"
+) {
   return db.query.pdfExports.findFirst({
-    where: eq(pdfExports.auditRunId, auditRunId)
+    where: and(eq(pdfExports.auditRunId, auditRunId), eq(pdfExports.variant, variant))
   });
 }

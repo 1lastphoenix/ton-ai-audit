@@ -57,6 +57,12 @@ export type FindingTransition = z.infer<typeof findingTransitionSchema>;
 export const pdfExportStatusSchema = z.enum(["queued", "running", "completed", "failed"]);
 export type PdfExportStatus = z.infer<typeof pdfExportStatusSchema>;
 
+export const pdfExportVariantSchema = z.enum(["client", "internal"]);
+export type PdfExportVariant = z.infer<typeof pdfExportVariantSchema>;
+
+export const auditProfileSchema = z.enum(["fast", "deep"]);
+export type AuditProfile = z.infer<typeof auditProfileSchema>;
+
 export const jobStepSchema = z.enum([
   "ingest",
   "verify",

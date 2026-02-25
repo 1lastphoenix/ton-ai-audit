@@ -5,7 +5,11 @@ import { chromium } from "playwright";
 import {
   auditRuns,
   findingInstances,
+  findingTransitions,
+  normalizeAuditReport,
   pdfExports,
+  reportBrandingSchema,
+  systemSettings,
   type JobPayloadMap
 } from "@ton-audit/shared";
 
@@ -31,90 +35,303 @@ function readNonEmptyString(value: unknown) {
   return normalized.length > 0 ? normalized : null;
 }
 
+function toSeverityBadgeClass(severity: string) {
+  switch (severity.toLowerCase()) {
+    case "critical":
+      return "sev-critical";
+    case "high":
+      return "sev-high";
+    case "medium":
+      return "sev-medium";
+    case "low":
+      return "sev-low";
+    default:
+      return "sev-info";
+  }
+}
+
+function renderTaxonomy(payload: Record<string, unknown>) {
+  const taxonomy = Array.isArray(payload.taxonomy) ? payload.taxonomy : [];
+  if (!taxonomy.length) {
+    return '<span class="pill">Unmapped</span>';
+  }
+
+  return taxonomy
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const standard = readNonEmptyString(row.standard) ?? "unknown";
+      const id = readNonEmptyString(row.id) ?? "n/a";
+      return `<span class="pill">${escapeHtml(`${standard.toUpperCase()}: ${id}`)}</span>`;
+    })
+    .join("");
+}
+
+function renderVerificationMatrix(report: ReturnType<typeof normalizeAuditReport>) {
+  if (!report.verificationMatrix.length) {
+    return `<p class="muted">No verification matrix available.</p>`;
+  }
+
+  return `
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>Step</th>
+          <th>Status</th>
+          <th>Summary</th>
+          <th>Artifacts</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${report.verificationMatrix
+          .map(
+            (entry) => `
+              <tr>
+                <td>${escapeHtml(entry.stepType)}</td>
+                <td>${escapeHtml(entry.status)}</td>
+                <td>${escapeHtml(entry.summary)}</td>
+                <td>${escapeHtml(entry.artifactKeys.join(", ")) || "-"}</td>
+              </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderTransitionSummary(transitions: Array<{ transition: string }>) {
+  const totals = transitions.reduce<Record<string, number>>((acc, row) => {
+    acc[row.transition] = (acc[row.transition] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return `
+    <div class="kpi-grid">
+      <div class="kpi"><span>Opened</span><strong>${totals.opened ?? 0}</strong></div>
+      <div class="kpi"><span>Resolved</span><strong>${totals.resolved ?? 0}</strong></div>
+      <div class="kpi"><span>Regressed</span><strong>${totals.regressed ?? 0}</strong></div>
+      <div class="kpi"><span>Unchanged</span><strong>${totals.unchanged ?? 0}</strong></div>
+    </div>
+  `;
+}
+
 function renderReportHtml(params: {
-  report: Record<string, unknown>;
+  report: ReturnType<typeof normalizeAuditReport>;
   findings: Array<Record<string, unknown>>;
+  transitions: Array<{ transition: string }>;
   model: {
     used: string | null;
     primary: string | null;
     fallback: string | null;
   };
+  variant: "client" | "internal";
+  branding: ReturnType<typeof reportBrandingSchema.parse>;
 }) {
   const report = params.report;
-  const findings = params.findings;
   const generatedAt = readNonEmptyString(report.generatedAt) ?? new Date().toISOString();
   const usedModel = params.model.used ?? "Unknown";
   const primaryModel = params.model.primary ?? "Unknown";
   const fallbackModel = params.model.fallback ?? "Unknown";
+  const findings = params.findings;
+  const isInternal = params.variant === "internal";
 
   const findingSections = findings
     .map((item, index) => {
       const payload = (item.payloadJson as Record<string, unknown>) ?? {};
       const evidence = (payload.evidence as Record<string, unknown>) ?? {};
+      const cvss =
+        payload.cvssV31 && typeof payload.cvssV31 === "object"
+          ? (payload.cvssV31 as Record<string, unknown>)
+          : null;
+      const preconditions = Array.isArray(payload.preconditions)
+        ? (payload.preconditions as string[]).map((value) => `<li>${escapeHtml(String(value))}</li>`).join("")
+        : "";
+      const verificationPlan = Array.isArray(payload.verificationPlan)
+        ? (payload.verificationPlan as string[]).map((value) => `<li>${escapeHtml(String(value))}</li>`).join("")
+        : "";
+      const attackScenario = readNonEmptyString(payload.attackScenario) ?? "";
+      const businessImpact = readNonEmptyString(payload.businessImpact) ?? "";
+      const technicalImpact = readNonEmptyString(payload.technicalImpact) ?? "";
+
       return `
         <section class="finding">
-          <h3>${index + 1}. ${escapeHtml(String(payload.title ?? "Untitled finding"))}</h3>
-          <p><strong>Severity:</strong> ${escapeHtml(String(payload.severity ?? item.severity ?? "unknown"))}</p>
+          <div class="finding-head">
+            <h3>${index + 1}. ${escapeHtml(String(payload.title ?? "Untitled finding"))}</h3>
+            <span class="badge ${toSeverityBadgeClass(String(payload.severity ?? item.severity ?? "informational"))}">
+              ${escapeHtml(String(payload.severity ?? item.severity ?? "informational"))}
+            </span>
+          </div>
           <p><strong>Summary:</strong> ${escapeHtml(String(payload.summary ?? ""))}</p>
           <p><strong>Impact:</strong> ${escapeHtml(String(payload.impact ?? ""))}</p>
           <p><strong>Likelihood:</strong> ${escapeHtml(String(payload.likelihood ?? ""))}</p>
           <p><strong>Exploit Path:</strong> ${escapeHtml(String(payload.exploitPath ?? ""))}</p>
           <p><strong>Remediation:</strong> ${escapeHtml(String(payload.remediation ?? ""))}</p>
+          <p><strong>Fix Priority:</strong> ${escapeHtml(String(payload.fixPriority ?? "p2").toUpperCase())}</p>
+          <p><strong>Confidence:</strong> ${escapeHtml(String(payload.confidence ?? ""))}</p>
+          <p><strong>Taxonomy:</strong> ${renderTaxonomy(payload)}</p>
+          ${
+            cvss
+              ? `<p><strong>CVSS v3.1:</strong> ${escapeHtml(String(cvss.vector ?? ""))} (base: ${escapeHtml(
+                  String(cvss.baseScore ?? "")
+                )})</p>`
+              : "<p><strong>CVSS v3.1:</strong> not available</p>"
+          }
           <p><strong>Evidence:</strong> ${escapeHtml(
             `${String(evidence.filePath ?? "unknown")}:${String(evidence.startLine ?? "?")}-${String(evidence.endLine ?? "?")}`
           )}</p>
           <pre>${escapeHtml(String(evidence.snippet ?? ""))}</pre>
+          ${
+            preconditions
+              ? `<div><strong>Preconditions</strong><ul>${preconditions}</ul></div>`
+              : ""
+          }
+          ${
+            verificationPlan
+              ? `<div><strong>Verification Plan</strong><ul>${verificationPlan}</ul></div>`
+              : ""
+          }
+          ${attackScenario ? `<p><strong>Attack Scenario:</strong> ${escapeHtml(attackScenario)}</p>` : ""}
+          ${businessImpact ? `<p><strong>Business Impact:</strong> ${escapeHtml(businessImpact)}</p>` : ""}
+          ${technicalImpact ? `<p><strong>Technical Impact:</strong> ${escapeHtml(technicalImpact)}</p>` : ""}
         </section>
       `;
     })
     .join("\n");
 
+  const internalAppendix = isInternal
+    ? `
+      <section class="section">
+        <h2>Internal Appendix</h2>
+        <p><strong>Verification Notes</strong></p>
+        <ul>
+          ${report.appendix.verificationNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}
+        </ul>
+        ${
+          report.appendix.internalNotes.length
+            ? `<p><strong>Internal Notes</strong></p><ul>${report.appendix.internalNotes
+                .map((note) => `<li>${escapeHtml(note)}</li>`)
+                .join("")}</ul>`
+            : ""
+        }
+      </section>
+    `
+    : "";
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>TON Audit Report</title>
+  <title>${escapeHtml(params.branding.reportTitle)}</title>
   <style>
-    body { font-family: Arial, sans-serif; color: #0f172a; padding: 32px 32px 52px; }
-    h1 { margin-bottom: 8px; }
-    h2 { margin-top: 28px; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; }
-    .meta { color: #475569; font-size: 12px; margin-bottom: 24px; }
-    .meta-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 20px; }
-    .meta-card p { margin: 4px 0; font-size: 12px; color: #334155; }
-    .finding { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin-bottom: 16px; page-break-inside: avoid; }
-    pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .report-footer { position: fixed; left: 0; right: 0; bottom: 10px; text-align: center; font-size: 11px; color: #64748b; }
+    :root {
+      --brand-primary: ${escapeHtml(params.branding.primaryColor)};
+      --brand-accent: ${escapeHtml(params.branding.accentColor)};
+      --text: #0f172a;
+      --muted: #475569;
+      --line: #cbd5e1;
+      --bg-soft: #f8fafc;
+    }
+    @page { size: A4; margin: 24px; }
+    body { font-family: "Segoe UI", Arial, sans-serif; color: var(--text); margin: 0; padding: 0; }
+    .cover { page-break-after: always; min-height: 90vh; display: flex; flex-direction: column; justify-content: center; }
+    .cover h1 { margin: 0 0 12px; font-size: 34px; color: var(--brand-primary); }
+    .cover .meta { color: var(--muted); font-size: 13px; margin: 6px 0; }
+    .section { margin-bottom: 22px; page-break-inside: avoid; }
+    h2 { margin: 0 0 10px; color: var(--brand-primary); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+    h3 { margin: 0; font-size: 16px; }
+    .muted { color: var(--muted); }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+    .kpi { border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); padding: 10px; }
+    .kpi span { display: block; color: var(--muted); font-size: 11px; }
+    .kpi strong { font-size: 18px; }
+    .matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .matrix th, .matrix td { border: 1px solid var(--line); padding: 7px; text-align: left; vertical-align: top; }
+    .matrix thead th { background: var(--bg-soft); }
+    .finding { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 16px; page-break-inside: avoid; }
+    .finding-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 8px; }
+    .badge { border-radius: 999px; padding: 3px 9px; font-size: 11px; text-transform: uppercase; border: 1px solid transparent; }
+    .sev-critical { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+    .sev-high { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
+    .sev-medium { background: #fef9c3; color: #854d0e; border-color: #fde68a; }
+    .sev-low { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+    .sev-info { background: #e0f2fe; color: #0c4a6e; border-color: #bae6fd; }
+    .pill { display: inline-block; border: 1px solid var(--line); background: var(--bg-soft); border-radius: 999px; padding: 2px 8px; margin-right: 6px; font-size: 11px; }
+    pre { background: #f1f5f9; border: 1px solid var(--line); border-radius: 8px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+    ul { margin-top: 4px; }
   </style>
 </head>
 <body>
-  <h1>TON Smart Contract Security Audit</h1>
-  <p class="meta">Generated at ${escapeHtml(generatedAt)}</p>
-  <div class="meta-card">
+  <section class="cover">
+    <p class="meta">${escapeHtml(params.branding.confidentialityNotice)}</p>
+    <h1>${escapeHtml(params.branding.reportTitle)}</h1>
+    <p class="meta"><strong>Issuer:</strong> ${escapeHtml(params.branding.issuerName)}</p>
+    <p class="meta"><strong>Audit ID:</strong> ${escapeHtml(report.auditId)}</p>
+    <p class="meta"><strong>Generated At:</strong> ${escapeHtml(generatedAt)}</p>
+    <p class="meta"><strong>Variant:</strong> ${escapeHtml(params.variant)}</p>
+    <p class="meta"><strong>Profile:</strong> ${escapeHtml(report.profile)}</p>
+    <p class="meta">${escapeHtml(params.branding.legalDisclaimer)}</p>
+  </section>
+
+  <section class="section">
+    <h2>Engagement Metadata & Scope</h2>
+    <p><strong>Project ID:</strong> ${escapeHtml(report.projectId)}</p>
+    <p><strong>Revision ID:</strong> ${escapeHtml(report.revisionId)}</p>
     <p><strong>AI/LLM Model Used:</strong> ${escapeHtml(usedModel)}</p>
     <p><strong>Primary Model:</strong> ${escapeHtml(primaryModel)}</p>
     <p><strong>Fallback Model:</strong> ${escapeHtml(fallbackModel)}</p>
-  </div>
-  <h2>Scope</h2>
-  <pre>${escapeHtml(JSON.stringify((report.summary as Record<string, unknown>)?.scope ?? [], null, 2))}</pre>
-  <h2>Methodology</h2>
-  <p>${escapeHtml(String((report.summary as Record<string, unknown>)?.methodology ?? ""))}</p>
-  <h2>Overview</h2>
-  <p>${escapeHtml(String((report.summary as Record<string, unknown>)?.overview ?? ""))}</p>
-  <h2>Findings</h2>
-  ${findingSections}
-  <footer class="report-footer">audit.circulo.cloud</footer>
+    <p><strong>Scope:</strong> ${escapeHtml(report.methodology.scope.join(", "))}</p>
+  </section>
+
+  <section class="section">
+    <h2>Executive Risk Posture</h2>
+    <p>${escapeHtml(report.executiveSummary.overview)}</p>
+    <div class="kpi-grid">
+      <div class="kpi"><span>Critical</span><strong>${report.riskPosture.severityTotals.critical ?? 0}</strong></div>
+      <div class="kpi"><span>High</span><strong>${report.riskPosture.severityTotals.high ?? 0}</strong></div>
+      <div class="kpi"><span>Medium</span><strong>${report.riskPosture.severityTotals.medium ?? 0}</strong></div>
+      <div class="kpi"><span>Low/Info</span><strong>${(report.riskPosture.severityTotals.low ?? 0) + (report.riskPosture.severityTotals.informational ?? 0)}</strong></div>
+    </div>
+    <p><strong>Overall Risk:</strong> ${escapeHtml(report.executiveSummary.overallRisk)}</p>
+    <p><strong>CVSS Average:</strong> ${report.riskPosture.cvssAverage ?? "n/a"} | <strong>CVSS Max:</strong> ${report.riskPosture.maxCvssScore ?? "n/a"}</p>
+  </section>
+
+  <section class="section">
+    <h2>Methodology</h2>
+    <p>${escapeHtml(report.methodology.approach)}</p>
+    <p><strong>Standards:</strong> ${escapeHtml(report.methodology.standards.join(", "))}</p>
+    <p><strong>Limitations:</strong> ${escapeHtml(report.methodology.limitations.join(" | ")) || "-"}</p>
+    <p><strong>Assumptions:</strong> ${escapeHtml(report.methodology.assumptions.join(" | ")) || "-"}</p>
+  </section>
+
+  <section class="section">
+    <h2>Verification Matrix</h2>
+    ${renderVerificationMatrix(report)}
+  </section>
+
+  <section class="section">
+    <h2>Differential Analysis</h2>
+    ${renderTransitionSummary(params.transitions)}
+  </section>
+
+  <section class="section">
+    <h2>Detailed Findings</h2>
+    ${findingSections}
+  </section>
+
+  ${internalAppendix}
 </body>
 </html>`;
 }
 
 export function createPdfProcessor() {
   return async function pdf(job: Job<JobPayloadMap["pdf"]>) {
+    const variant = job.data.variant ?? "client";
+
     await recordJobEvent({
       projectId: job.data.projectId,
       queue: "pdf",
       jobId: String(job.id),
       event: "started",
-      payload: { data: job.data }
+      payload: { data: job.data, variant }
     });
 
     let browser;
@@ -131,10 +348,11 @@ export function createPdfProcessor() {
         .insert(pdfExports)
         .values({
           auditRunId: auditRun.id,
+          variant,
           status: "running"
         })
         .onConflictDoUpdate({
-          target: pdfExports.auditRunId,
+          target: [pdfExports.auditRunId, pdfExports.variant],
           set: {
             status: "running",
             updatedAt: new Date()
@@ -145,18 +363,31 @@ export function createPdfProcessor() {
         throw new Error("Audit report not found");
       }
 
+      const report = normalizeAuditReport(auditRun.reportJson);
       const findings = await db.query.findingInstances.findMany({
         where: eq(findingInstances.auditRunId, auditRun.id)
       });
+      const transitions = await db.query.findingTransitions.findMany({
+        where: eq(findingTransitions.toAuditRunId, auditRun.id)
+      });
       const reportModel =
-        auditRun.reportJson.model &&
-        typeof auditRun.reportJson.model === "object"
-          ? (auditRun.reportJson.model as Record<string, unknown>)
+        report.model && typeof report.model === "object"
+          ? (report.model as Record<string, unknown>)
           : {};
 
+      const brandingSetting = await db.query.systemSettings.findFirst({
+        where: eq(systemSettings.key, "pdf_report_branding")
+      });
+      const branding = reportBrandingSchema.parse(
+        (brandingSetting?.value as Record<string, unknown> | undefined) ?? {}
+      );
+
       const html = renderReportHtml({
-        report: auditRun.reportJson,
+        report,
         findings: findings as unknown as Array<Record<string, unknown>>,
+        transitions: transitions.map((row) => ({ transition: row.transition })),
+        variant,
+        branding,
         model: {
           used: readNonEmptyString(reportModel.used),
           primary: readNonEmptyString(reportModel.primary) ?? auditRun.primaryModelId,
@@ -172,15 +403,19 @@ export function createPdfProcessor() {
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate: `<div style="font-size:9px;width:100%;text-align:center;color:#64748b;">${escapeHtml(report.auditId)} · ${escapeHtml(variant.toUpperCase())}</div>`,
+        footerTemplate:
+          '<div style="font-size:9px;width:100%;text-align:center;color:#64748b;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
         margin: {
-          top: "24px",
+          top: "40px",
           right: "24px",
-          bottom: "24px",
+          bottom: "36px",
           left: "24px"
         }
       });
 
-      const s3Key = `pdf/${auditRun.id}/${Date.now()}.pdf`;
+      const s3Key = `pdf/${auditRun.id}/${variant}/${Date.now()}.pdf`;
       await putObject({
         key: s3Key,
         body: pdfBuffer,
@@ -196,17 +431,17 @@ export function createPdfProcessor() {
           expiresAt: null,
           updatedAt: new Date()
         })
-        .where(eq(pdfExports.auditRunId, auditRun.id));
+        .where(and(eq(pdfExports.auditRunId, auditRun.id), eq(pdfExports.variant, variant)));
 
       await recordJobEvent({
         projectId: job.data.projectId,
         queue: "pdf",
         jobId: String(job.id),
         event: "completed",
-        payload: { auditRunId: auditRun.id, s3Key }
+        payload: { auditRunId: auditRun.id, s3Key, variant }
       });
 
-      return { auditRunId: auditRun.id, s3Key };
+      return { auditRunId: auditRun.id, s3Key, variant };
     } catch (error) {
       await db
         .update(pdfExports)
@@ -214,7 +449,9 @@ export function createPdfProcessor() {
           status: "failed",
           updatedAt: new Date()
         })
-        .where(eq(pdfExports.auditRunId, job.data.auditRunId));
+        .where(
+          and(eq(pdfExports.auditRunId, job.data.auditRunId), eq(pdfExports.variant, variant))
+        );
 
       throw error;
     } finally {

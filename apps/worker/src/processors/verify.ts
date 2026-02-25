@@ -104,7 +104,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
       jobId: String(job.id),
       projectId: job.data.projectId,
       revisionId: job.data.revisionId,
-      auditRunId: job.data.auditRunId
+      auditRunId: job.data.auditRunId,
+      profile: job.data.profile
     };
 
     workerLogger.info("verify.stage.started", context);
@@ -512,6 +513,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           projectId: job.data.projectId,
           revisionId: job.data.revisionId,
           auditRunId: auditRun.id,
+          profile: job.data.profile,
           includeDocsFallbackFetch: job.data.includeDocsFallbackFetch
         },
         `audit:${job.data.projectId}:${auditRun.id}`

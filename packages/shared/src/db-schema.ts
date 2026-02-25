@@ -17,9 +17,11 @@ import {
 import { relations, sql } from "drizzle-orm";
 
 import {
+  auditProfileSchema,
   auditRunStatusSchema,
   findingTransitionSchema,
   languageSchema,
+  pdfExportVariantSchema,
   pdfExportStatusSchema,
   projectLifecycleStateSchema,
   revisionSourceSchema,
@@ -96,6 +98,14 @@ export const findingTransitionEnum = pgEnum(
 export const pdfExportStatusEnum = pgEnum(
   "pdf_export_status",
   toPgEnumValues(pdfExportStatusSchema.options)
+);
+export const pdfExportVariantEnum = pgEnum(
+  "pdf_export_variant",
+  toPgEnumValues(pdfExportVariantSchema.options)
+);
+export const auditProfileEnum = pgEnum(
+  "audit_profile",
+  toPgEnumValues(auditProfileSchema.options)
 );
 export const languageEnum = pgEnum("language", toPgEnumValues(languageSchema.options));
 
@@ -378,8 +388,11 @@ export const auditRuns = pgTable(
     requestedByUserId: text("requested_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    profile: auditProfileEnum("profile").notNull().default("deep"),
     primaryModelId: text("primary_model_id").notNull(),
     fallbackModelId: text("fallback_model_id").notNull(),
+    engineVersion: text("engine_version").notNull().default("ton-audit-pro-v2"),
+    reportSchemaVersion: integer("report_schema_version").notNull().default(2),
     reportJson: jsonb("report_json").$type<Record<string, unknown>>(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -388,7 +401,8 @@ export const auditRuns = pgTable(
   },
   (table) => ({
     revisionIdx: index("audit_runs_revision_idx").on(table.revisionId),
-    statusIdx: index("audit_runs_status_idx").on(table.status)
+    statusIdx: index("audit_runs_status_idx").on(table.status),
+    profileIdx: index("audit_runs_profile_idx").on(table.profile)
   })
 );
 
@@ -535,6 +549,7 @@ export const pdfExports = pgTable(
       .notNull()
       .references(() => auditRuns.id, { onDelete: "cascade" }),
     status: pdfExportStatusEnum("status").notNull().default("queued"),
+    variant: pdfExportVariantEnum("variant").notNull().default("client"),
     s3Key: text("s3_key"),
     generatedAt: timestamp("generated_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
@@ -542,7 +557,11 @@ export const pdfExports = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    auditUnique: unique("pdf_exports_audit_run_unique").on(table.auditRunId)
+    auditVariantUnique: unique("pdf_exports_audit_variant_unique").on(
+      table.auditRunId,
+      table.variant
+    ),
+    auditIdx: index("pdf_exports_audit_run_idx").on(table.auditRunId)
   })
 );
 

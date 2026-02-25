@@ -234,11 +234,14 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
             revisionId: revision.id,
             status: "queued",
             requestedByUserId: job.data.requestedByUserId,
+            profile: "deep",
             primaryModelId: modelAllowlist[0] ?? "google/gemini-2.5-flash",
             fallbackModelId:
               modelAllowlist[1] ??
               modelAllowlist[0] ??
               "google/gemini-2.5-flash",
+            engineVersion: "ton-audit-pro-v2",
+            reportSchemaVersion: 2
           })
           .returning();
 
@@ -277,6 +280,7 @@ export function createIngestProcessor(deps: { enqueueJob: EnqueueJob }) {
           projectId: revision.projectId,
           revisionId: revision.id,
           auditRunId: auditRun.id,
+          profile: auditRun.profile,
           includeDocsFallbackFetch: true,
         },
         `verify:${revision.projectId}:${auditRun.id}`,

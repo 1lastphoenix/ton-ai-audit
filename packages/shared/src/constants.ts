@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { languageSchema, severitySchema, uploadTypeSchema } from "./enums";
+import {
+  auditProfileSchema,
+  languageSchema,
+  pdfExportVariantSchema,
+  severitySchema,
+  uploadTypeSchema
+} from "./enums";
 
 export const DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_UPLOAD_MAX_FILES = 300;
@@ -65,6 +71,23 @@ export const findingEvidenceSchema = z.object({
   snippet: z.string().min(1),
 });
 
+export const findingTaxonomyReferenceSchema = z.object({
+  standard: z.enum(["owasp-sc", "cwe", "swc"]),
+  id: z.string().min(1),
+  title: z.string().min(1).optional(),
+  url: z.string().url().optional()
+});
+
+export const cvssV31Schema = z.object({
+  vector: z.string().min(1),
+  baseScore: z.number().min(0).max(10),
+  severity: z.enum(["none", "low", "medium", "high", "critical"]).optional(),
+  exploitabilityScore: z.number().min(0).max(10).optional(),
+  impactScore: z.number().min(0).max(10).optional()
+});
+
+export const fixPrioritySchema = z.enum(["p0", "p1", "p2", "p3"]);
+
 export const auditFindingSchema = z.object({
   findingId: z.string().min(1),
   severity: severitySchema,
@@ -78,6 +101,16 @@ export const auditFindingSchema = z.object({
   confidence: z.number().min(0).max(1),
   references: z.array(z.string().url()).default([]),
   language: languageSchema.optional(),
+  taxonomy: z.array(findingTaxonomyReferenceSchema).default([]),
+  cvssV31: cvssV31Schema.optional(),
+  preconditions: z.array(z.string().min(1)).default([]),
+  attackScenario: z.string().default(""),
+  affectedContracts: z.array(z.string().min(1)).default([]),
+  exploitability: z.string().default(""),
+  businessImpact: z.string().default(""),
+  technicalImpact: z.string().default(""),
+  fixPriority: fixPrioritySchema.default("p2"),
+  verificationPlan: z.array(z.string().min(1)).default([])
 });
 
 export type AuditFinding = z.infer<typeof auditFindingSchema>;
@@ -159,7 +192,28 @@ export const workingCopyPatchFileSchema = z.object({
 export const runAuditSchema = z.object({
   primaryModelId: z.string().min(1),
   fallbackModelId: z.string().min(1),
+  profile: auditProfileSchema.default("deep"),
   includeDocsFallbackFetch: z.boolean().default(true),
+});
+
+export const pdfExportRequestSchema = z.object({
+  variant: pdfExportVariantSchema.default("client")
+});
+
+export const reportBrandingSchema = z.object({
+  reportTitle: z.string().min(1).default("TON Smart Contract Security Audit"),
+  issuerName: z.string().min(1).default("TON Audit Platform"),
+  issuerLogoUrl: z.string().url().optional(),
+  primaryColor: z.string().min(1).default("#0f172a"),
+  accentColor: z.string().min(1).default("#0ea5e9"),
+  confidentialityNotice: z
+    .string()
+    .default("Confidential. For authorized recipients only."),
+  legalDisclaimer: z
+    .string()
+    .default("This report is provided as-is and reflects findings at the time of assessment."),
+  signatureLabel: z.string().default("Lead Security Reviewer"),
+  signerName: z.string().default("Security Team")
 });
 
 export const docsCrawlSeedSchema = z.object({

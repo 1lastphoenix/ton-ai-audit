@@ -66,18 +66,6 @@ export async function GET(
     const stream = new ReadableStream({
       async start(controller) {
         let streamClosed = false;
-        let pollInterval: ReturnType<typeof setInterval> | undefined;
-        let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
-        let lifetimeTimeout: ReturnType<typeof setTimeout> | undefined;
-
-        const close = () => {
-          if (streamClosed) return;
-          streamClosed = true;
-          clearInterval(pollInterval);
-          clearInterval(heartbeatInterval);
-          clearTimeout(lifetimeTimeout);
-          controller.close();
-        };
 
         const pollEvents = async () => {
           if (pollingInFlight || streamClosed) {
@@ -122,21 +110,28 @@ export async function GET(
           }
         };
 
-        pollInterval = setInterval(() => {
+        const pollInterval = setInterval(() => {
           void pollEvents();
         }, POLL_INTERVAL_MS);
 
         // Heartbeat: keeps reverse proxies and load balancers from closing idle connections.
-        heartbeatInterval = setInterval(() => {
+        const heartbeatInterval = setInterval(() => {
           if (!streamClosed) {
             controller.enqueue(encoder.encode(": heartbeat\n\n"));
           }
         }, HEARTBEAT_INTERVAL_MS);
 
+        const close = () => {
+          if (streamClosed) return;
+          streamClosed = true;
+          clearInterval(pollInterval);
+          clearInterval(heartbeatInterval);
+          clearTimeout(lifetimeTimeout);
+          controller.close();
+        };
+
         // Hard cap: close the stream after MAX_STREAM_LIFETIME_MS regardless.
-        lifetimeTimeout = setTimeout(() => {
-          close();
-        }, MAX_STREAM_LIFETIME_MS);
+        const lifetimeTimeout = setTimeout(close, MAX_STREAM_LIFETIME_MS);
 
         void pollEvents();
 
