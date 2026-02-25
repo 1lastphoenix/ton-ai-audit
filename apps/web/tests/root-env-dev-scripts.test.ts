@@ -1,41 +1,106 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-describe("dev scripts use root env loader", () => {
-  it("routes web and worker dev scripts through run-with-root-env", () => {
+type PackageJson = {
+  scripts?: Record<string, string>;
+};
+
+function readJson<T>(filePath: string) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+}
+
+describe("run-with-root-env usage", () => {
+  it("routes web and worker dev/db scripts through root env loader", () => {
     const repoRoot = path.resolve(process.cwd(), "..", "..");
-    const webPackagePath = path.join(repoRoot, "apps", "web", "package.json");
-    const workerPackagePath = path.join(repoRoot, "apps", "worker", "package.json");
+    const webPackage = readJson<PackageJson>(path.join(repoRoot, "apps", "web", "package.json"));
+    const workerPackage = readJson<PackageJson>(path.join(repoRoot, "apps", "worker", "package.json"));
 
-    const webPackage = JSON.parse(fs.readFileSync(webPackagePath, "utf8")) as {
-      scripts?: Record<string, string>;
-    };
-    const workerPackage = JSON.parse(fs.readFileSync(workerPackagePath, "utf8")) as {
-      scripts?: Record<string, string>;
-    };
+    const webScripts = webPackage.scripts ?? {};
+    const workerScripts = workerPackage.scripts ?? {};
 
-    expect(webPackage.scripts?.dev).toContain("scripts/run-with-root-env.mjs");
-    expect(workerPackage.scripts?.dev).toContain("scripts/run-with-root-env.mjs");
+    expect(webScripts.dev).toMatch(/^node\s+\.\.\/\.\.\/scripts\/run-with-root-env\.mjs\s+--\s+/);
+    expect(workerScripts.dev).toMatch(/^node\s+\.\.\/\.\.\/scripts\/run-with-root-env\.mjs\s+--\s+/);
+    expect(webScripts["db:generate"]).toMatch(/^node\s+\.\.\/\.\.\/scripts\/run-with-root-env\.mjs\s+--\s+/);
+    expect(webScripts["db:migrate"]).toMatch(/^node\s+\.\.\/\.\.\/scripts\/run-with-root-env\.mjs\s+--\s+/);
+    expect(webScripts["db:push"]).toMatch(/^node\s+\.\.\/\.\.\/scripts\/run-with-root-env\.mjs\s+--\s+/);
   });
 
-  it("applies root env values after process env to avoid stale shell overrides", () => {
-    const repoRoot = path.resolve(process.cwd(), "..", "..");
-    const scriptPath = path.join(repoRoot, "scripts", "run-with-root-env.mjs");
-    const source = fs.readFileSync(scriptPath, "utf8");
+  it("prefers root env values over inherited process env", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "root-env-loader-"));
+    const scriptsDir = path.join(tempRoot, "scripts");
+    fs.mkdirSync(scriptsDir, { recursive: true });
 
-    expect(source).toMatch(/\.\.\.process\.env,\s*\.\.\.envFromRoot/s);
+    const sourceScript = path.resolve(process.cwd(), "..", "..", "scripts", "run-with-root-env.mjs");
+    const tempScript = path.join(scriptsDir, "run-with-root-env.mjs");
+    const probeScript = path.join(tempRoot, "print-priority.cjs");
+    fs.copyFileSync(sourceScript, tempScript);
+    fs.writeFileSync(path.join(tempRoot, ".env.local"), "TEST_PRIORITY=from-root\n");
+    fs.writeFileSync(probeScript, "process.stdout.write(process.env.TEST_PRIORITY ?? '');\n");
+
+    const output = execFileSync(
+      process.execPath,
+      [tempScript, "--", process.execPath, probeScript],
+      {
+        cwd: tempRoot,
+        env: {
+          ...process.env,
+          TEST_PRIORITY: "from-process"
+        },
+        encoding: "utf8"
+      }
+    ).trim();
+
+    expect(output).toBe("from-root");
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it("runs db scripts through the root env loader", () => {
-    const repoRoot = path.resolve(process.cwd(), "..", "..");
-    const webPackagePath = path.join(repoRoot, "apps", "web", "package.json");
-    const webPackage = JSON.parse(fs.readFileSync(webPackagePath, "utf8")) as {
-      scripts?: Record<string, string>;
+  it("derives DATABASE_URL and POSTGRES_PASSWORD from DB_PASSWORD when needed", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "root-env-loader-db-"));
+    const scriptsDir = path.join(tempRoot, "scripts");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+
+    const sourceScript = path.resolve(process.cwd(), "..", "..", "scripts", "run-with-root-env.mjs");
+    const tempScript = path.join(scriptsDir, "run-with-root-env.mjs");
+    const probeScript = path.join(tempRoot, "print-db-env.cjs");
+    fs.copyFileSync(sourceScript, tempScript);
+
+    fs.writeFileSync(
+      path.join(tempRoot, ".env.local"),
+      [
+        "DB_PASSWORD=top-secret",
+        "POSTGRES_USER=ton",
+        "POSTGRES_DB=ton_audit"
+      ].join("\n")
+    );
+    fs.writeFileSync(
+      probeScript,
+      "process.stdout.write(JSON.stringify({ db: process.env.DB_PASSWORD, pg: process.env.POSTGRES_PASSWORD, url: process.env.DATABASE_URL }));\n"
+    );
+
+    const output = execFileSync(
+      process.execPath,
+      [tempScript, "--", process.execPath, probeScript],
+      {
+        cwd: tempRoot,
+        env: process.env,
+        encoding: "utf8"
+      }
+    ).trim();
+
+    const parsed = JSON.parse(output) as {
+      db?: string;
+      pg?: string;
+      url?: string;
     };
 
-    expect(webPackage.scripts?.["db:generate"]).toContain("scripts/run-with-root-env.mjs");
-    expect(webPackage.scripts?.["db:migrate"]).toContain("scripts/run-with-root-env.mjs");
-    expect(webPackage.scripts?.["db:push"]).toContain("scripts/run-with-root-env.mjs");
+    expect(parsed.db).toBe("top-secret");
+    expect(parsed.pg).toBe("top-secret");
+    expect(parsed.url).toBe("postgresql://ton:top-secret@localhost:5432/ton_audit");
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });
