@@ -145,8 +145,6 @@ type PdfExportStatus =
   | "completed"
   | "failed";
 
-type PdfExportVariant = "client" | "internal";
-
 type AuditHistoryItem = {
   id: string;
   revisionId: string;
@@ -156,14 +154,17 @@ type AuditHistoryItem = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  profile: "fast" | "deep";
+  profile: AuditProfile;
   engineVersion: string;
   reportSchemaVersion: number;
   primaryModelId: string;
   fallbackModelId: string;
   findingCount: number;
   pdfStatus: PdfExportStatus;
-  pdfStatusByVariant: Record<PdfExportVariant, PdfExportStatus>;
+  pdfStatusByVariant?: {
+    client?: PdfExportStatus;
+    internal?: PdfExportStatus;
+  };
 };
 
 type AuditCompareItem = {
@@ -232,6 +233,8 @@ type WorkbenchFileEntry = {
   language: Language;
 };
 
+type AuditProfile = "fast" | "deep";
+
 type VerifyProgressStepStatus =
   | "pending"
   | "running"
@@ -268,6 +271,70 @@ type VerifyProgressState = {
   sandboxAdapter: string | null;
   mode: string | null;
   steps: VerifyProgressStep[];
+};
+
+const auditPipelineStageDefinitions = [
+  {
+    id: "verify-plan",
+    label: "Verification Plan",
+    description: "Plan compilation, toolchain detection, and adapter selection.",
+  },
+  {
+    id: "security-scans",
+    label: "Security Scans",
+    description: "Deterministic security rules and surface scans.",
+  },
+  {
+    id: "sandbox-checks",
+    label: "Sandbox Checks",
+    description: "Command-mapped sandbox execution of verification steps.",
+  },
+  {
+    id: "agent-discovery",
+    label: "Agent Discovery",
+    description: "Initial finding candidate discovery pass.",
+  },
+  {
+    id: "agent-validation",
+    label: "Agent Validation",
+    description: "Adversarial validation pass (deep profile).",
+  },
+  {
+    id: "agent-synthesis",
+    label: "Agent Synthesis",
+    description: "Final synthesis pass into strict report schema.",
+  },
+  {
+    id: "quality-gate",
+    label: "Report Quality Gate",
+    description: "Taxonomy, CVSS, and quality checks before acceptance.",
+  },
+] as const;
+
+type AuditPipelineStageId =
+  (typeof auditPipelineStageDefinitions)[number]["id"];
+type AuditPipelineStageStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
+type AuditPipelineStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+type AuditPipelineStageState = {
+  status: AuditPipelineStageStatus;
+  detail: string | null;
+  updatedAt: number | null;
+};
+type AuditPipelineState = {
+  profile: AuditProfile | null;
+  status: AuditPipelineStatus;
+  currentStageId: AuditPipelineStageId | null;
+  stages: Record<AuditPipelineStageId, AuditPipelineStageState>;
 };
 
 type BackendJobEvent = {
@@ -726,15 +793,15 @@ function toProfileLabel(profile: string) {
   return profile === "fast" ? "FAST" : "DEEP";
 }
 
-function toPdfVariantLabel(variant: PdfExportVariant) {
-  return variant === "internal" ? "Internal" : "Client";
-}
-
 function resolveAuditPdfStatus(
   audit: Pick<AuditHistoryItem, "pdfStatus" | "pdfStatusByVariant">,
-  variant: PdfExportVariant
 ) {
-  return audit.pdfStatusByVariant?.[variant] ?? audit.pdfStatus;
+  return (
+    audit.pdfStatusByVariant?.internal ??
+    audit.pdfStatus ??
+    audit.pdfStatusByVariant?.client ??
+    "not_requested"
+  );
 }
 
 function canExportAuditPdf(auditStatus?: string | null, pdfStatus?: string | null) {
@@ -762,6 +829,252 @@ function createIdleVerifyProgress(): VerifyProgressState {
     mode: null,
     steps: [],
   };
+}
+
+function normalizeAuditProfile(value: unknown): AuditProfile | null {
+  return value === "fast" || value === "deep" ? value : null;
+}
+
+function createAuditPipelineStageMap(
+  profile: AuditProfile | null = null,
+): Record<AuditPipelineStageId, AuditPipelineStageState> {
+  const stages = {} as Record<AuditPipelineStageId, AuditPipelineStageState>;
+
+  for (const definition of auditPipelineStageDefinitions) {
+    const isFastValidationSkip =
+      definition.id === "agent-validation" && profile === "fast";
+    stages[definition.id] = {
+      status: isFastValidationSkip ? "skipped" : "pending",
+      detail: isFastValidationSkip ? "Skipped for Fast profile." : null,
+      updatedAt: null,
+    };
+  }
+
+  return stages;
+}
+
+function createIdleAuditPipeline(profile: AuditProfile | null = null): AuditPipelineState {
+  return {
+    profile,
+    status: "idle",
+    currentStageId: null,
+    stages: createAuditPipelineStageMap(profile),
+  };
+}
+
+function createQueuedAuditPipeline(profile: AuditProfile): AuditPipelineState {
+  return {
+    ...createIdleAuditPipeline(profile),
+    status: "queued",
+  };
+}
+
+function withAuditPipelineProfile(
+  current: AuditPipelineState,
+  profile: AuditProfile | null,
+): AuditPipelineState {
+  if (!profile || current.profile === profile) {
+    return current;
+  }
+
+  const nextStages = { ...current.stages };
+  const validationStage = nextStages["agent-validation"];
+  nextStages["agent-validation"] = {
+    ...validationStage,
+    status:
+      profile === "fast"
+        ? validationStage.status === "completed"
+          ? "completed"
+          : "skipped"
+        : validationStage.status === "skipped"
+          ? "pending"
+          : validationStage.status,
+    detail:
+      profile === "fast"
+        ? validationStage.status === "completed"
+          ? validationStage.detail
+          : "Skipped for Fast profile."
+        : validationStage.status === "skipped"
+          ? null
+          : validationStage.detail,
+    updatedAt: Date.now(),
+  };
+
+  return {
+    ...current,
+    profile,
+    stages: nextStages,
+  };
+}
+
+function updateAuditPipelineStage(
+  current: AuditPipelineState,
+  params: {
+    stageId: AuditPipelineStageId;
+    status: AuditPipelineStageStatus;
+    detail?: string | null;
+    makeCurrent?: boolean;
+  },
+): AuditPipelineState {
+  const makeCurrent = params.makeCurrent ?? params.status === "running";
+  const now = Date.now();
+  const nextStages = { ...current.stages };
+
+  if (
+    makeCurrent &&
+    current.currentStageId &&
+    current.currentStageId !== params.stageId
+  ) {
+    const previousStage = nextStages[current.currentStageId];
+    if (previousStage.status === "running") {
+      nextStages[current.currentStageId] = {
+        ...previousStage,
+        status: "completed",
+        updatedAt: now,
+      };
+    }
+  }
+
+  const stage = nextStages[params.stageId];
+  nextStages[params.stageId] = {
+    ...stage,
+    status: params.status,
+    detail: params.detail ?? stage.detail,
+    updatedAt: now,
+  };
+
+  const nextStatus =
+    current.status === "idle" || current.status === "queued"
+      ? "running"
+      : current.status;
+  const nextCurrentStageId = makeCurrent
+    ? params.stageId
+    : current.currentStageId === params.stageId && params.status !== "running"
+      ? null
+      : current.currentStageId;
+
+  return {
+    ...current,
+    status: nextStatus,
+    currentStageId: nextCurrentStageId,
+    stages: nextStages,
+  };
+}
+
+function finalizeAuditPipeline(
+  current: AuditPipelineState,
+  status: "completed" | "failed",
+  failureDetail?: string,
+): AuditPipelineState {
+  const now = Date.now();
+  const nextStages = { ...current.stages };
+
+  if (status === "failed") {
+    if (current.currentStageId) {
+      const activeStage = nextStages[current.currentStageId];
+      nextStages[current.currentStageId] = {
+        ...activeStage,
+        status: "failed",
+        detail: failureDetail ?? activeStage.detail,
+        updatedAt: now,
+      };
+    }
+
+    return {
+      ...current,
+      status,
+      currentStageId: null,
+      stages: nextStages,
+    };
+  }
+
+  for (const definition of auditPipelineStageDefinitions) {
+    const stage = nextStages[definition.id];
+    if (stage.status === "running") {
+      nextStages[definition.id] = {
+        ...stage,
+        status: "completed",
+        updatedAt: now,
+      };
+      continue;
+    }
+
+    if (stage.status !== "pending") {
+      continue;
+    }
+
+    const shouldSkipValidation =
+      definition.id === "agent-validation" && current.profile === "fast";
+    const defaultStatus =
+      definition.id === "quality-gate"
+        ? "completed"
+        : shouldSkipValidation
+          ? "skipped"
+          : "skipped";
+    nextStages[definition.id] = {
+      ...stage,
+      status: defaultStatus,
+      detail:
+        definition.id === "quality-gate"
+          ? stage.detail ?? "Quality gates passed."
+          : shouldSkipValidation
+            ? "Skipped for Fast profile."
+            : stage.detail,
+      updatedAt: now,
+    };
+  }
+
+  return {
+    ...current,
+    status,
+    currentStageId: null,
+    stages: nextStages,
+  };
+}
+
+function auditPipelineStageStatusClass(status: AuditPipelineStageStatus) {
+  switch (status) {
+    case "running":
+      return "border-primary/40 bg-primary/10 text-primary";
+    case "completed":
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "failed":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "skipped":
+      return "border-border bg-muted text-muted-foreground";
+    default:
+      return "border-border bg-background text-muted-foreground";
+  }
+}
+
+function toAuditPipelineStageStatusLabel(status: AuditPipelineStageStatus) {
+  switch (status) {
+    case "running":
+      return "Running";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "skipped":
+      return "Skipped";
+    default:
+      return "Pending";
+  }
+}
+
+function toAuditPipelineStatusLabel(status: AuditPipelineStatus) {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "running":
+      return "Running";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    default:
+      return "Idle";
+  }
 }
 
 function isVerifyProgressStepStatus(
@@ -1172,7 +1485,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       normalizedModelAllowlist[0] ??
       DEFAULT_MODEL_ID,
   );
-  const [auditProfile, setAuditProfile] = useState<"fast" | "deep">("deep");
+  const [auditProfile, setAuditProfile] = useState<AuditProfile>("deep");
   const [jobState, setJobState] = useState<string>("idle");
   const [auditStatus, setAuditStatus] = useState<string>("idle");
   const [lspStatus, setLspStatus] = useState<TonLspStatus>("idle");
@@ -1185,6 +1498,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [activityFeed, setActivityFeed] = useState<WorkbenchLogEntry[]>([]);
   const [verifyProgress, setVerifyProgress] = useState<VerifyProgressState>(
     createIdleVerifyProgress(),
+  );
+  const [auditPipeline, setAuditPipeline] = useState<AuditPipelineState>(
+    createIdleAuditPipeline(),
   );
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
   const [isInlineNewFile, setIsInlineNewFile] = useState(false);
@@ -1263,6 +1579,51 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     verifyProgress.phase !== "idle" ||
     verifyProgressTotalSteps > 0 ||
     verifyProgress.steps.length > 0;
+  const auditPipelineStages = useMemo(
+    () =>
+      auditPipelineStageDefinitions.map((definition) => ({
+        ...definition,
+        ...auditPipeline.stages[definition.id],
+      })),
+    [auditPipeline.stages],
+  );
+  const auditPipelineTotalStages = auditPipelineStages.length;
+  const auditPipelineResolvedStages = auditPipelineStages.filter(
+    (stage) =>
+      stage.status === "completed" ||
+      stage.status === "failed" ||
+      stage.status === "skipped",
+  ).length;
+  const auditPipelinePercent =
+    auditPipelineTotalStages > 0
+      ? Math.round((auditPipelineResolvedStages / auditPipelineTotalStages) * 100)
+      : 0;
+  const auditPipelineCurrentStage = useMemo(() => {
+    if (!auditPipeline.currentStageId) {
+      return null;
+    }
+
+    return (
+      auditPipelineStages.find((stage) => stage.id === auditPipeline.currentStageId) ??
+      null
+    );
+  }, [auditPipeline.currentStageId, auditPipelineStages]);
+  const shouldShowExecutionTracker =
+    shouldShowVerifyProgress ||
+    auditPipeline.status !== "idle" ||
+    isAuditInProgress;
+  const executionTrackerStatus: AuditPipelineStatus =
+    auditPipeline.status !== "idle"
+      ? auditPipeline.status
+      : auditStatus === "queued"
+        ? "queued"
+        : auditStatus === "running"
+          ? "running"
+          : auditStatus === "failed"
+            ? "failed"
+            : auditStatus === "completed"
+              ? "completed"
+              : "idle";
   const filteredTree = useMemo(
     () => filterWorkbenchTree(tree, explorerQuery),
     [tree, explorerQuery],
@@ -1648,7 +2009,11 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         audits?: AuditHistoryItem[];
       };
       const nextHistory = (payload.audits ?? []).map((item) => {
-        const fallbackPdfStatus = item.pdfStatus ?? "not_requested";
+        const normalizedPdfStatus =
+          item.pdfStatusByVariant?.internal ??
+          item.pdfStatus ??
+          item.pdfStatusByVariant?.client ??
+          "not_requested";
         return {
           ...item,
           profile: item.profile === "fast" ? "fast" : "deep",
@@ -1658,11 +2023,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
             Number.isFinite(item.reportSchemaVersion)
               ? item.reportSchemaVersion
               : 1,
+          pdfStatus: normalizedPdfStatus,
           pdfStatusByVariant: {
-            client: item.pdfStatusByVariant?.client ?? fallbackPdfStatus,
-            internal:
-              item.pdfStatusByVariant?.internal ??
-              (item.pdfStatusByVariant?.client ?? "not_requested")
+            internal: normalizedPdfStatus,
+            client: item.pdfStatusByVariant?.client
           }
         } satisfies AuditHistoryItem;
       });
@@ -1769,6 +2133,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [fromCompareAuditId, projectId, pushWorkbenchLog, toCompareAuditId]);
 
   useEffect(() => {
+    fileCacheRef.current = {};
     setFileCache({});
     setOpenTabs([]);
     setDirtyPaths([]);
@@ -1776,6 +2141,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   }, [revisionId]);
 
   useEffect(() => {
+    fileCacheRef.current = {};
     setFileCache({});
     setDirtyPaths([]);
   }, [workingCopyId]);
@@ -1842,6 +2208,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   useEffect(() => {
     lastAuditStatusRef.current = "idle";
     setVerifyProgress(createIdleVerifyProgress());
+    setAuditPipeline(createIdleAuditPipeline());
   }, [auditId]);
 
   useEffect(() => {
@@ -1907,6 +2274,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
             payload.payload && typeof payload.payload === "object"
               ? (payload.payload as Record<string, unknown>)
               : {};
+          const verifyDataPayload =
+            verifyPayload.data && typeof verifyPayload.data === "object"
+              ? (verifyPayload.data as Record<string, unknown>)
+              : null;
+          const verifyProfile = normalizeAuditProfile(
+            verifyPayload.profile ?? verifyDataPayload?.profile,
+          );
+
+          if (verifyProfile) {
+            setAuditPipeline((current) =>
+              withAuditPipelineProfile(current, verifyProfile),
+            );
+          }
 
           if (payload.event === "progress") {
             const phase =
@@ -1981,6 +2361,161 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               };
             });
 
+            setAuditPipeline((current) => {
+              let next = verifyProfile
+                ? withAuditPipelineProfile(current, verifyProfile)
+                : current;
+              if (next.status === "idle" || next.status === "queued") {
+                next = {
+                  ...next,
+                  status: "running",
+                };
+              }
+
+              if (phase === "plan-ready") {
+                const detailParts = [
+                  toolchain ? `Toolchain ${toolchain}` : null,
+                  sandboxAdapter ? `Adapter ${sandboxAdapter}` : null,
+                  `Steps ${totalSteps ?? progressSteps.length}`,
+                ].filter((item): item is string => Boolean(item));
+                return updateAuditPipelineStage(next, {
+                  stageId: "verify-plan",
+                  status: "completed",
+                  detail: detailParts.join(" | "),
+                  makeCurrent: false,
+                });
+              }
+
+              if (phase === "security-scan") {
+                const scanStatus =
+                  typeof verifyPayload.status === "string"
+                    ? verifyPayload.status
+                    : "running";
+                const completedScans =
+                  typeof verifyPayload.completedScans === "number" &&
+                  Number.isFinite(verifyPayload.completedScans)
+                    ? Math.max(0, Math.trunc(verifyPayload.completedScans))
+                    : null;
+                const failedScans =
+                  typeof verifyPayload.failedScans === "number" &&
+                  Number.isFinite(verifyPayload.failedScans)
+                    ? Math.max(0, Math.trunc(verifyPayload.failedScans))
+                    : null;
+                const diagnostics =
+                  typeof verifyPayload.diagnostics === "number" &&
+                  Number.isFinite(verifyPayload.diagnostics)
+                    ? Math.max(0, Math.trunc(verifyPayload.diagnostics))
+                    : null;
+                if (scanStatus === "started" || scanStatus === "running") {
+                  return updateAuditPipelineStage(next, {
+                    stageId: "security-scans",
+                    status: "running",
+                    detail: "Executing deterministic security scanners.",
+                  });
+                }
+
+                return updateAuditPipelineStage(next, {
+                  stageId: "security-scans",
+                  status:
+                    scanStatus === "completed_with_failures" ||
+                    (failedScans ?? 0) > 0
+                      ? "failed"
+                      : "completed",
+                  detail: [
+                    completedScans !== null
+                      ? `Completed ${completedScans}`
+                      : null,
+                    failedScans !== null ? `Failed ${failedScans}` : null,
+                    diagnostics !== null ? `Diagnostics ${diagnostics}` : null,
+                  ]
+                    .filter((item): item is string => Boolean(item))
+                    .join(" | "),
+                  makeCurrent: false,
+                });
+              }
+
+              if (phase === "sandbox-running") {
+                const runningStep =
+                  progressSteps.find((step) => step.status === "running") ??
+                  (currentStepId
+                    ? progressSteps.find((step) => step.id === currentStepId)
+                    : (progressSteps[0] ?? null));
+                const runningStepIndex = runningStep
+                  ? progressSteps.findIndex((step) => step.id === runningStep.id) + 1
+                  : 1;
+                const runningTotal = totalSteps ?? progressSteps.length;
+                return updateAuditPipelineStage(next, {
+                  stageId: "sandbox-checks",
+                  status: "running",
+                  detail: runningStep
+                    ? `${runningStep.id} (${runningStepIndex}/${runningTotal || 1})`
+                    : "Running sandbox checks.",
+                });
+              }
+
+              if (phase === "sandbox-completed") {
+                const completed =
+                  typeof verifyPayload.completed === "number" &&
+                  Number.isFinite(verifyPayload.completed)
+                    ? Math.max(0, Math.trunc(verifyPayload.completed))
+                    : null;
+                const failed =
+                  typeof verifyPayload.failed === "number" &&
+                  Number.isFinite(verifyPayload.failed)
+                    ? Math.max(0, Math.trunc(verifyPayload.failed))
+                    : null;
+                const skipped =
+                  typeof verifyPayload.skipped === "number" &&
+                  Number.isFinite(verifyPayload.skipped)
+                    ? Math.max(0, Math.trunc(verifyPayload.skipped))
+                    : null;
+                const timeout =
+                  typeof verifyPayload.timeout === "number" &&
+                  Number.isFinite(verifyPayload.timeout)
+                    ? Math.max(0, Math.trunc(verifyPayload.timeout))
+                    : null;
+                const hasSandboxFailures =
+                  (failed ?? 0) > 0 || (timeout ?? 0) > 0;
+                return updateAuditPipelineStage(next, {
+                  stageId: "sandbox-checks",
+                  status: hasSandboxFailures ? "failed" : "completed",
+                  detail: [
+                    completed !== null ? `Passed ${completed}` : null,
+                    failed !== null ? `Failed ${failed}` : null,
+                    skipped !== null ? `Skipped ${skipped}` : null,
+                    timeout !== null ? `Timeout ${timeout}` : null,
+                  ]
+                    .filter((item): item is string => Boolean(item))
+                    .join(" | "),
+                  makeCurrent: false,
+                });
+              }
+
+              if (phase === "sandbox-failed") {
+                const message =
+                  typeof verifyPayload.message === "string"
+                    ? verifyPayload.message
+                    : "Sandbox execution failed.";
+                return updateAuditPipelineStage(next, {
+                  stageId: "sandbox-checks",
+                  status: "failed",
+                  detail: message,
+                  makeCurrent: false,
+                });
+              }
+
+              if (phase === "sandbox-skipped") {
+                return updateAuditPipelineStage(next, {
+                  stageId: "sandbox-checks",
+                  status: "skipped",
+                  detail: "No sandbox checks were planned.",
+                  makeCurrent: false,
+                });
+              }
+
+              return next;
+            });
+
             if (phase === "plan-ready") {
               setActivityMessage(
                 totalSteps && totalSteps > 0
@@ -2025,10 +2560,22 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 Number.isFinite(verifyPayload.completed)
                   ? Math.max(0, Math.trunc(verifyPayload.completed))
                   : null;
+              const failed =
+                typeof verifyPayload.failed === "number" &&
+                Number.isFinite(verifyPayload.failed)
+                  ? Math.max(0, Math.trunc(verifyPayload.failed))
+                  : summarizeVerifyProgress(progressSteps).failed;
+              const timeout =
+                typeof verifyPayload.timeout === "number" &&
+                Number.isFinite(verifyPayload.timeout)
+                  ? Math.max(0, Math.trunc(verifyPayload.timeout))
+                  : summarizeVerifyProgress(progressSteps).timeout;
               const finishedSteps =
                 completed ?? summarizeVerifyProgress(progressSteps).completed;
               setActivityMessage(
-                `Verification sandbox completed: ${finishedSteps}/${totalSteps ?? progressSteps.length} step(s) passed.`,
+                failed > 0 || timeout > 0
+                  ? `Verification sandbox completed with issues: passed ${finishedSteps}, failed ${failed}, timeout ${timeout}.`
+                  : `Verification sandbox completed: ${finishedSteps}/${totalSteps ?? progressSteps.length} step(s) passed.`,
               );
             } else if (phase === "sandbox-failed") {
               const progressError =
@@ -2097,6 +2644,29 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               setActivityMessage(
                 `Verification step ${stepPayload.id}: ${stepPayload.status}.`,
               );
+              setAuditPipeline((current) => {
+                let next = verifyProfile
+                  ? withAuditPipelineProfile(current, verifyProfile)
+                  : current;
+                if (next.status === "idle" || next.status === "queued") {
+                  next = {
+                    ...next,
+                    status: "running",
+                  };
+                }
+
+                return updateAuditPipelineStage(next, {
+                  stageId: "sandbox-checks",
+                  status:
+                    stepPayload.status === "failed" ||
+                    stepPayload.status === "timeout"
+                      ? "failed"
+                      : stepPayload.status === "completed"
+                        ? "running"
+                        : "running",
+                  detail: `${stepPayload.id} is ${stepPayload.status}.`,
+                });
+              });
             }
             return;
           }
@@ -2110,6 +2680,18 @@ export function TonWorkbench(props: TonWorkbenchProps) {
               phase: current.phase === "idle" ? "plan-ready" : current.phase,
             }));
             setActivityMessage("Verification started.");
+            setAuditPipeline((current) => {
+              const next = verifyProfile
+                ? withAuditPipelineProfile(current, verifyProfile)
+                : current;
+              return {
+                ...next,
+                status:
+                  next.status === "idle" || next.status === "queued"
+                    ? "running"
+                    : next.status,
+              };
+            });
           } else if (
             payload.event === "completed" ||
             payload.event === "worker-completed"
@@ -2122,37 +2704,252 @@ export function TonWorkbench(props: TonWorkbenchProps) {
             setActivityMessage(
               "Verification completed. Waiting for audit stage...",
             );
+            setAuditPipeline((current) => {
+              let next = verifyProfile
+                ? withAuditPipelineProfile(current, verifyProfile)
+                : current;
+
+              if (next.stages["verify-plan"].status === "pending") {
+                next = updateAuditPipelineStage(next, {
+                  stageId: "verify-plan",
+                  status: "completed",
+                  detail: "Verification completed.",
+                  makeCurrent: false,
+                });
+              }
+              if (next.stages["security-scans"].status === "pending") {
+                next = updateAuditPipelineStage(next, {
+                  stageId: "security-scans",
+                  status: "skipped",
+                  detail: "No security scans executed.",
+                  makeCurrent: false,
+                });
+              }
+              if (next.stages["sandbox-checks"].status === "pending") {
+                next = updateAuditPipelineStage(next, {
+                  stageId: "sandbox-checks",
+                  status: "skipped",
+                  detail: "No sandbox checks executed.",
+                  makeCurrent: false,
+                });
+              }
+              return {
+                ...next,
+                status: next.status === "idle" ? "running" : next.status,
+                currentStageId:
+                  next.currentStageId === "verify-plan" ||
+                  next.currentStageId === "security-scans" ||
+                  next.currentStageId === "sandbox-checks"
+                    ? null
+                    : next.currentStageId,
+              };
+            });
           } else if (isFailureEvent) {
+            const verifyError =
+              typeof verifyPayload.message === "string"
+                ? verifyPayload.message
+                : "Verification failed.";
             setVerifyProgress((current) => ({
               ...current,
               phase: "failed",
               currentStepId: null,
             }));
-            setActivityMessage("Verification failed.");
+            setActivityMessage(`Verification failed: ${verifyError}`);
+            setAuditPipeline((current) => {
+              let next = verifyProfile
+                ? withAuditPipelineProfile(current, verifyProfile)
+                : current;
+              const activeVerifyStage: AuditPipelineStageId =
+                next.currentStageId === "verify-plan" ||
+                next.currentStageId === "security-scans" ||
+                next.currentStageId === "sandbox-checks"
+                  ? next.currentStageId
+                  : next.stages["sandbox-checks"].status === "running"
+                    ? "sandbox-checks"
+                    : next.stages["security-scans"].status === "running"
+                      ? "security-scans"
+                      : "verify-plan";
+              next = updateAuditPipelineStage(next, {
+                stageId: activeVerifyStage,
+                status: "failed",
+                detail: verifyError,
+                makeCurrent: false,
+              });
+              return {
+                ...next,
+                status: "failed",
+                currentStageId: null,
+              };
+            });
           }
           return;
         }
 
         if (payload.queue === "audit") {
+          const auditPayload =
+            payload.payload && typeof payload.payload === "object"
+              ? (payload.payload as Record<string, unknown>)
+              : {};
+          const auditDataPayload =
+            auditPayload.data && typeof auditPayload.data === "object"
+              ? (auditPayload.data as Record<string, unknown>)
+              : null;
+          const auditProfilePayload = normalizeAuditProfile(
+            auditPayload.profile ?? auditDataPayload?.profile,
+          );
+          if (auditProfilePayload) {
+            setAuditPipeline((current) =>
+              withAuditPipelineProfile(current, auditProfilePayload),
+            );
+          }
+
+          if (payload.event === "progress") {
+            const auditPhase =
+              typeof auditPayload.phase === "string" ? auditPayload.phase : null;
+            if (auditPhase === "agent-discovery") {
+              const modelId =
+                typeof auditPayload.modelId === "string"
+                  ? auditPayload.modelId
+                  : null;
+              setAuditPipeline((current) =>
+                updateAuditPipelineStage(
+                  auditProfilePayload
+                    ? withAuditPipelineProfile(current, auditProfilePayload)
+                    : current,
+                  {
+                    stageId: "agent-discovery",
+                    status: "running",
+                    detail: modelId
+                      ? `Model ${modelId}`
+                      : "ToolLoop discovery pass is running.",
+                  },
+                ),
+              );
+              setActivityMessage("Audit discovery pass is running.");
+              return;
+            }
+
+            if (auditPhase === "agent-validation") {
+              const modelId =
+                typeof auditPayload.modelId === "string"
+                  ? auditPayload.modelId
+                  : null;
+              setAuditPipeline((current) =>
+                updateAuditPipelineStage(
+                  auditProfilePayload
+                    ? withAuditPipelineProfile(current, auditProfilePayload)
+                    : current,
+                  {
+                    stageId: "agent-validation",
+                    status: "running",
+                    detail: modelId
+                      ? `Model ${modelId}`
+                      : "Adversarial validation pass is running.",
+                  },
+                ),
+              );
+              setActivityMessage("Audit validation pass is running.");
+              return;
+            }
+
+            if (auditPhase === "agent-synthesis") {
+              const candidateCount =
+                typeof auditPayload.candidateCount === "number" &&
+                Number.isFinite(auditPayload.candidateCount)
+                  ? Math.max(0, Math.trunc(auditPayload.candidateCount))
+                  : null;
+              setAuditPipeline((current) =>
+                updateAuditPipelineStage(
+                  auditProfilePayload
+                    ? withAuditPipelineProfile(current, auditProfilePayload)
+                    : current,
+                  {
+                    stageId: "agent-synthesis",
+                    status: "running",
+                    detail:
+                      candidateCount !== null
+                        ? `Synthesizing ${candidateCount} candidate(s).`
+                        : "Final synthesis pass is running.",
+                  },
+                ),
+              );
+              setActivityMessage("Audit synthesis pass is running.");
+              return;
+            }
+
+            if (auditPhase === "report-quality-gate") {
+              const passed = auditPayload.passed === true;
+              const failuresCount = Array.isArray(auditPayload.failures)
+                ? auditPayload.failures.length
+                : 0;
+              setAuditPipeline((current) => {
+                let next = auditProfilePayload
+                  ? withAuditPipelineProfile(current, auditProfilePayload)
+                  : current;
+                next = updateAuditPipelineStage(next, {
+                  stageId: "quality-gate",
+                  status: "running",
+                  detail: "Evaluating quality gates.",
+                });
+                return updateAuditPipelineStage(next, {
+                  stageId: "quality-gate",
+                  status: passed ? "completed" : "failed",
+                  detail: passed
+                    ? "Quality gates passed."
+                    : `Quality gate rejected (${failuresCount} issue(s)).`,
+                  makeCurrent: false,
+                });
+              });
+              setActivityMessage(
+                passed
+                  ? "Report quality gates passed."
+                  : "Report quality gate rejected. Retrying model pass.",
+              );
+              return;
+            }
+          }
+
           if (
             payload.event === "started" ||
             payload.event === "worker-started"
           ) {
             setAuditStatus("running");
             setActivityMessage("Audit analysis is running.");
+            setAuditPipeline((current) => {
+              const next = auditProfilePayload
+                ? withAuditPipelineProfile(current, auditProfilePayload)
+                : current;
+              return {
+                ...next,
+                status:
+                  next.status === "idle" || next.status === "queued"
+                    ? "running"
+                    : next.status,
+              };
+            });
           } else if (
             payload.event === "completed" ||
             payload.event === "worker-completed"
           ) {
             setAuditStatus("completed");
             setActivityMessage("Audit completed.");
+            setAuditPipeline((current) =>
+              finalizeAuditPipeline(current, "completed"),
+            );
             if (auditId) {
               loadAudit(auditId).catch(() => undefined);
             }
             loadAuditHistory().catch(() => undefined);
           } else if (isFailureEvent) {
+            const auditError =
+              typeof auditPayload.message === "string"
+                ? auditPayload.message
+                : "Audit failed.";
             setAuditStatus("failed");
-            setActivityMessage("Audit failed.");
+            setActivityMessage(`Audit failed: ${auditError}`);
+            setAuditPipeline((current) =>
+              finalizeAuditPipeline(current, "failed", auditError),
+            );
             loadAuditHistory().catch(() => undefined);
           }
           return;
@@ -2722,6 +3519,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
 
     setVerifyProgress(createIdleVerifyProgress());
+    setAuditPipeline(createQueuedAuditPipeline(auditProfile));
     setIsBusy(true);
     setJobState("queuing");
     setLastError(null);
@@ -2802,6 +3600,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       );
       loadAuditHistory().catch(() => undefined);
     } catch (error) {
+      setAuditPipeline(createIdleAuditPipeline());
       setLastError(error instanceof Error ? error.message : "Run audit failed");
       pushWorkbenchLog(
         "error",
@@ -2812,23 +3611,18 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     }
   }
 
-  async function exportPdfForAudit(
-    targetAuditId: string,
-    variant: PdfExportVariant = "client",
-  ) {
+  async function exportPdfForAudit(targetAuditId: string) {
     if (!targetAuditId) {
       return;
     }
 
     const targetAudit = auditHistory.find((item) => item.id === targetAuditId);
-    const targetVariantStatus = targetAudit
-      ? resolveAuditPdfStatus(targetAudit, variant)
-      : null;
+    const targetPdfStatus = targetAudit ? resolveAuditPdfStatus(targetAudit) : null;
     const isCompleted =
       targetAudit?.status === "completed" ||
       (targetAuditId === auditId && auditStatus === "completed");
     const canExport =
-      canExportAuditPdf(targetAudit?.status, targetVariantStatus) ||
+      canExportAuditPdf(targetAudit?.status, targetPdfStatus) ||
       (targetAuditId === auditId && canExportAuditPdf(auditStatus, null));
     if (!canExport) {
       const message = "PDF export is available after the audit completes.";
@@ -2840,15 +3634,14 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     setIsBusy(true);
     setLastError(null);
-    setActivityMessage(`Preparing ${toPdfVariantLabel(variant)} PDF export...`);
+    setActivityMessage("Preparing final audit PDF export...");
     pushWorkbenchLog(
       "info",
-      `Preparing ${toPdfVariantLabel(variant)} PDF export for audit ${shortId(targetAuditId)}.`,
+      `Preparing final audit PDF export for audit ${shortId(targetAuditId)}.`,
     );
     try {
-      const search = new URLSearchParams({ variant }).toString();
       const existingStatusResponse = await fetch(
-        `/api/projects/${projectId}/audits/${targetAuditId}/pdf?${search}`,
+        `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
         {
           cache: "no-store",
         },
@@ -2860,12 +3653,10 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         };
         if (existingStatusPayload.url) {
           window.open(existingStatusPayload.url, "_blank", "noopener,noreferrer");
-          setActivityMessage(
-            `${toPdfVariantLabel(variant)} PDF is ready and opened in a new tab.`,
-          );
+          setActivityMessage("Final audit PDF is ready and opened in a new tab.");
           pushWorkbenchLog(
             "info",
-            `Opened existing ${toPdfVariantLabel(variant)} PDF for audit ${shortId(targetAuditId)}.`,
+            `Opened existing final audit PDF for audit ${shortId(targetAuditId)}.`,
           );
           return;
         }
@@ -2877,19 +3668,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         );
       }
 
-      setActivityMessage(`Queueing ${toPdfVariantLabel(variant)} PDF export...`);
+      setActivityMessage("Queueing final audit PDF export...");
       pushWorkbenchLog(
         "info",
-        `Queueing ${toPdfVariantLabel(variant)} PDF export for audit ${shortId(targetAuditId)}.`,
+        `Queueing final audit PDF export for audit ${shortId(targetAuditId)}.`,
       );
       const start = await fetch(
         `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ variant }),
         },
       );
       if (!start.ok) {
@@ -2908,7 +3695,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const statusResponse = await fetch(
-          `/api/projects/${projectId}/audits/${targetAuditId}/pdf?${search}`,
+          `/api/projects/${projectId}/audits/${targetAuditId}/pdf`,
           {
             cache: "no-store",
           },
@@ -2933,9 +3720,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
         }
 
         if (statusPayload.status === "failed") {
-          throw new Error(
-            `${toPdfVariantLabel(variant)} PDF generation failed on the worker.`,
-          );
+          throw new Error("Final audit PDF generation failed on the worker.");
         }
       }
 
@@ -2948,24 +3733,22 @@ export function TonWorkbench(props: TonWorkbenchProps) {
       }
 
       window.open(url, "_blank", "noopener,noreferrer");
-      setActivityMessage(
-        `${toPdfVariantLabel(variant)} PDF is ready and opened in a new tab.`,
-      );
+      setActivityMessage("Final audit PDF is ready and opened in a new tab.");
       pushWorkbenchLog(
         "info",
-        `${toPdfVariantLabel(variant)} PDF export for audit ${shortId(targetAuditId)} completed.`,
+        `Final audit PDF export for audit ${shortId(targetAuditId)} completed.`,
       );
     } catch (error) {
       setLastError(
         error instanceof Error
           ? error.message
-          : `${toPdfVariantLabel(variant)} PDF export failed`,
+          : "Final audit PDF export failed",
       );
       pushWorkbenchLog(
         "error",
         error instanceof Error
           ? error.message
-          : `${toPdfVariantLabel(variant)} PDF export failed`,
+          : "Final audit PDF export failed",
       );
     } finally {
       loadAuditHistory().catch(() => undefined);
@@ -3620,7 +4403,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                     </Button>
                   </WorkbenchTooltip>
 
-                  <WorkbenchTooltip content="Export Client PDF">
+                  <WorkbenchTooltip content="Export Final Audit PDF">
                     <Button
                       type="button"
                       size="icon-sm"
@@ -3632,10 +4415,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                         (activeAuditHistoryItem
                           ? !canExportAuditPdf(
                               activeAuditHistoryItem.status,
-                              resolveAuditPdfStatus(
-                                activeAuditHistoryItem,
-                                "client",
-                              ),
+                              resolveAuditPdfStatus(activeAuditHistoryItem),
                             )
                           : auditStatus !== "completed")
                       }
@@ -3839,82 +4619,226 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                   </div>
                 </div>
 
-                <div className="h-32">
+                <div className="h-56">
                   {bottomPanelTab === "audit-log" ? (
                     <ScrollArea className="h-full px-2 py-2">
-                      {shouldShowVerifyProgress ? (
+                      {shouldShowExecutionTracker ? (
                         <div className="bg-background/70 mb-2 rounded border border-border p-2">
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <span className="text-foreground font-medium">
-                              Verify
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                            <span className="text-foreground font-semibold">
+                              Execution Tracker
                             </span>
-                            <span className="text-muted-foreground">
-                              {verifyProgressPhaseLabel(verifyProgress.phase)}
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "h-4 border px-1.5 text-[10px] font-medium",
+                                auditStatusBadgeClass(executionTrackerStatus),
+                              )}
+                            >
+                              {toAuditPipelineStatusLabel(executionTrackerStatus)}
+                            </Badge>
+                            {auditPipeline.profile ? (
+                              <Badge
+                                variant="outline"
+                                className="h-4 border px-1.5 text-[10px] font-medium"
+                              >
+                                {toProfileLabel(auditPipeline.profile)}
+                              </Badge>
+                            ) : null}
+                            <span className="text-muted-foreground ml-auto">
+                              {auditPipelineResolvedStages}/
+                              {auditPipelineTotalStages} stages
                             </span>
-                            {verifyProgressTotalSteps > 0 ? (
-                              <span className="text-muted-foreground">
-                                {verifyProgressResolvedSteps}/
-                                {verifyProgressTotalSteps} step(s)
-                              </span>
-                            ) : null}
-                            {verifyProgressCurrentStep ? (
-                              <span className="text-muted-foreground ml-auto max-w-[220px] truncate">
-                                Current: {verifyProgressCurrentStep.id}
-                              </span>
-                            ) : null}
                           </div>
 
-                          {verifyProgressTotalSteps > 0 ? (
-                            <div className="bg-muted mt-1 h-1.5 overflow-hidden rounded">
-                              <div
-                                className={cn(
-                                  "h-full rounded transition-[width]",
-                                  verifyProgress.phase === "failed" ||
-                                    verifyProgress.phase === "sandbox-failed"
-                                    ? "bg-destructive"
-                                    : "bg-primary",
-                                )}
-                                style={{ width: `${verifyProgressPercent}%` }}
-                              />
-                            </div>
-                          ) : null}
+                          <div className="bg-muted mt-1 h-1.5 overflow-hidden rounded">
+                            <div
+                              className={cn(
+                                "h-full rounded transition-[width]",
+                                executionTrackerStatus === "failed"
+                                  ? "bg-destructive"
+                                  : "bg-primary",
+                              )}
+                              style={{ width: `${auditPipelinePercent}%` }}
+                            />
+                          </div>
 
-                          {verifyProgress.steps.length ? (
-                            <div className="mt-1 space-y-0.5">
-                              {verifyProgress.steps.map((step, index) => (
-                                <div
-                                  key={step.id}
-                                  className="flex items-center gap-2 text-[11px]"
-                                >
-                                  <span className="text-muted-foreground w-5 shrink-0">
-                                    {index + 1}.
-                                  </span>
-                                  <WorkbenchTooltip content={step.action}>
-                                    <span className="text-foreground flex-1 truncate">
-                                      {step.id}
-                                    </span>
-                                  </WorkbenchTooltip>
-                                  {step.durationMs !== null ? (
-                                    <span className="text-muted-foreground shrink-0">
-                                      {(step.durationMs / 1000).toFixed(1)}s
-                                    </span>
-                                  ) : null}
-                                  <span
+                          <div className="mt-2 overflow-x-auto rounded border border-border/70">
+                            <table className="w-full min-w-[640px] text-[11px]">
+                              <thead className="bg-muted/40 text-muted-foreground">
+                                <tr>
+                                  <th className="px-2 py-1 text-left font-medium">
+                                    Stage
+                                  </th>
+                                  <th className="px-2 py-1 text-left font-medium">
+                                    Status
+                                  </th>
+                                  <th className="px-2 py-1 text-left font-medium">
+                                    Details
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {auditPipelineStages.map((stage) => (
+                                  <tr
+                                    key={stage.id}
                                     className={cn(
-                                      "shrink-0 uppercase",
-                                      verifyStepStatusClass(step.status),
+                                      "border-t border-border/60",
+                                      auditPipeline.currentStageId === stage.id
+                                        ? "bg-primary/5"
+                                        : "",
                                     )}
                                   >
-                                    {step.status}
-                                  </span>
-                                </div>
-                              ))}
+                                    <td className="text-foreground px-2 py-1.5 font-medium">
+                                      {stage.label}
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <span
+                                        className={cn(
+                                          "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium",
+                                          auditPipelineStageStatusClass(
+                                            stage.status,
+                                          ),
+                                        )}
+                                      >
+                                        {toAuditPipelineStageStatusLabel(
+                                          stage.status,
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td className="text-muted-foreground px-2 py-1.5">
+                                      {stage.detail ??
+                                        (auditPipeline.currentStageId === stage.id
+                                          ? "Running..."
+                                          : stage.description)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <div className="mt-2 rounded border border-border/70">
+                            <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-2 py-1.5 text-[11px]">
+                              <span className="text-foreground font-medium">
+                                Verification Steps
+                              </span>
+                              <span className="text-muted-foreground">
+                                {verifyProgressPhaseLabel(verifyProgress.phase)}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {verifyProgressResolvedSteps}/
+                                {verifyProgressTotalSteps || 0}
+                              </span>
+                              {verifyProgressCurrentStep ? (
+                                <span className="text-muted-foreground ml-auto max-w-[240px] truncate">
+                                  Active: {verifyProgressCurrentStep.id}
+                                </span>
+                              ) : auditPipelineCurrentStage ? (
+                                <span className="text-muted-foreground ml-auto max-w-[240px] truncate">
+                                  Active: {auditPipelineCurrentStage.label}
+                                </span>
+                              ) : null}
                             </div>
-                          ) : (
-                            <div className="text-muted-foreground mt-1 text-[11px]">
-                              No sandbox steps for this verification plan.
+
+                            {verifyProgressTotalSteps > 0 ? (
+                              <div className="bg-muted h-1.5 overflow-hidden">
+                                <div
+                                  className={cn(
+                                    "h-full transition-[width]",
+                                    verifyProgress.phase === "failed" ||
+                                      verifyProgress.phase === "sandbox-failed"
+                                      ? "bg-destructive"
+                                      : "bg-primary",
+                                  )}
+                                  style={{ width: `${verifyProgressPercent}%` }}
+                                />
+                              </div>
+                            ) : null}
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[720px] text-[11px]">
+                                <thead className="bg-muted/20 text-muted-foreground">
+                                  <tr>
+                                    <th className="w-12 px-2 py-1 text-left font-medium">
+                                      #
+                                    </th>
+                                    <th className="px-2 py-1 text-left font-medium">
+                                      Step
+                                    </th>
+                                    <th className="px-2 py-1 text-left font-medium">
+                                      Action
+                                    </th>
+                                    <th className="px-2 py-1 text-left font-medium">
+                                      Status
+                                    </th>
+                                    <th className="px-2 py-1 text-left font-medium">
+                                      Duration
+                                    </th>
+                                    <th className="px-2 py-1 text-left font-medium">
+                                      Type
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {verifyProgress.steps.length ? (
+                                    verifyProgress.steps.map((step, index) => (
+                                      <tr
+                                        key={step.id}
+                                        className={cn(
+                                          "border-t border-border/60",
+                                          verifyProgressCurrentStep?.id === step.id
+                                            ? "bg-primary/5"
+                                            : "",
+                                        )}
+                                      >
+                                        <td className="text-muted-foreground px-2 py-1.5">
+                                          {index + 1}
+                                        </td>
+                                        <td className="text-foreground px-2 py-1.5 font-medium">
+                                          {step.id}
+                                        </td>
+                                        <td className="text-muted-foreground px-2 py-1.5">
+                                          <WorkbenchTooltip content={step.action}>
+                                            <span className="inline-block max-w-[300px] truncate align-middle">
+                                              {step.action}
+                                            </span>
+                                          </WorkbenchTooltip>
+                                        </td>
+                                        <td className="px-2 py-1.5">
+                                          <span
+                                            className={cn(
+                                              "inline-flex rounded border border-border px-1.5 py-0.5 uppercase",
+                                              verifyStepStatusClass(step.status),
+                                            )}
+                                          >
+                                            {step.status}
+                                          </span>
+                                        </td>
+                                        <td className="text-muted-foreground px-2 py-1.5">
+                                          {step.durationMs !== null
+                                            ? `${(step.durationMs / 1000).toFixed(1)}s`
+                                            : "n/a"}
+                                        </td>
+                                        <td className="text-muted-foreground px-2 py-1.5">
+                                          {step.optional ? "Optional" : "Required"}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr className="border-t border-border/60">
+                                      <td
+                                        colSpan={6}
+                                        className="text-muted-foreground px-2 py-2"
+                                      >
+                                        No sandbox step events yet.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
                             </div>
-                          )}
+                          </div>
                         </div>
                       ) : null}
 
@@ -4490,29 +5414,15 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                     >
                                       {toAuditStatusLabel(item.status)}
                                     </Badge>
-                                    <div className="flex items-center gap-1">
-                                      {(["client", "internal"] as const).map(
-                                        (variant) => {
-                                          const variantStatus = resolveAuditPdfStatus(
-                                            item,
-                                            variant,
-                                          );
-                                          return (
-                                            <Badge
-                                              key={`${item.id}-${variant}`}
-                                              variant="outline"
-                                              className={cn(
-                                                "h-5 border px-1.5 text-[10px] font-medium",
-                                                pdfStatusBadgeClass(variantStatus),
-                                              )}
-                                            >
-                                              {variant === "client" ? "C" : "I"}{" "}
-                                              {toPdfStatusLabel(variantStatus)}
-                                            </Badge>
-                                          );
-                                        },
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "h-5 border px-1.5 text-[10px] font-medium",
+                                        pdfStatusBadgeClass(resolveAuditPdfStatus(item)),
                                       )}
-                                    </div>
+                                    >
+                                      PDF {toPdfStatusLabel(resolveAuditPdfStatus(item))}
+                                    </Badge>
                                   </div>
                                 </div>
                                 <div className="text-muted-foreground mt-1.5 text-[11px]">
@@ -4530,17 +5440,19 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                   </Badge>
                                 </div>
                                 <div className="mt-2 flex items-center gap-1.5">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 px-2 text-[11px]"
-                                    onClick={() => {
-                                      viewAuditFromHistory(item);
-                                    }}
-                                  >
-                                    View
-                                  </Button>
+                                  {item.id !== auditId ? (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 px-2 text-[11px]"
+                                      onClick={() => {
+                                        viewAuditFromHistory(item);
+                                      }}
+                                    >
+                                      View
+                                    </Button>
+                                  ) : null}
                                   <Button
                                     type="button"
                                     size="sm"
@@ -4549,7 +5461,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                     disabled={
                                       !canExportAuditPdf(
                                         item.status,
-                                        resolveAuditPdfStatus(item, "client"),
+                                        resolveAuditPdfStatus(item),
                                       ) ||
                                       isBusy
                                     }
@@ -4557,25 +5469,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                                       void exportPdfForAudit(item.id);
                                     }}
                                   >
-                                    Client PDF
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 px-2 text-[11px]"
-                                    disabled={
-                                      !canExportAuditPdf(
-                                        item.status,
-                                        resolveAuditPdfStatus(item, "internal"),
-                                      ) ||
-                                      isBusy
-                                    }
-                                    onClick={() => {
-                                      void exportPdfForAudit(item.id, "internal");
-                                    }}
-                                  >
-                                    Internal PDF
+                                    Final PDF
                                   </Button>
                                 </div>
                               </div>

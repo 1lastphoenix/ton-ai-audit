@@ -197,7 +197,7 @@ export const runAuditSchema = z.object({
 });
 
 export const pdfExportRequestSchema = z.object({
-  variant: pdfExportVariantSchema.default("client")
+  variant: pdfExportVariantSchema.default("internal")
 });
 
 export const reportBrandingSchema = z.object({

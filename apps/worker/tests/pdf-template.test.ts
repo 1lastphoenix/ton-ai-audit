@@ -3,12 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("pdf template", () => {
-  it("includes model metadata and product footer in exported PDF html", () => {
+  it("includes model metadata and publication-grade sections in exported PDF html", () => {
     const filePath = path.resolve(process.cwd(), "src", "processors", "pdf.ts");
     const source = fs.readFileSync(filePath, "utf8");
 
-    expect(source).toContain("AI/LLM Model Used");
-    expect(source).toContain("audit.circulo.cloud");
+    expect(source).toContain("Table of Contents");
+    expect(source).toContain("Final Complete Audit PDF");
+    expect(source).toContain("Technical Appendix");
+    expect(source).toContain("renderInlineMarkdown");
     expect(source).toContain("Primary Model");
     expect(source).toContain("Fallback Model");
   });

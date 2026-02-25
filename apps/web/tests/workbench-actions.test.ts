@@ -46,6 +46,15 @@ describe("ton workbench actions", () => {
     expect(source).toContain("isEditable ? \"Read-only\" : \"Edit\"");
   });
 
+  it("clears file cache ref when revision or working copy context changes", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("fileCacheRef.current = {}");
+    expect(source).toContain("}, [workingCopyId]);");
+    expect(source).toContain("}, [revisionId]);");
+  });
+
   it("keeps save on keyboard shortcut without a toolbar save button", () => {
     const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
     const source = fs.readFileSync(filePath, "utf8");
@@ -80,7 +89,20 @@ describe("ton workbench actions", () => {
     expect(source).toContain("event === \"progress\"");
     expect(source).toContain("event === \"sandbox-step\"");
     expect(source).toContain("verifyProgressPhaseLabel");
-    expect(source).toContain("Current:");
+    expect(source).toContain("Execution Tracker");
+    expect(source).toContain("Verification Steps");
+  });
+
+  it("tracks audit phase progress in the same execution tracker", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const source = fs.readFileSync(filePath, "utf8");
+
+    expect(source).toContain("auditPipelineStageDefinitions");
+    expect(source).toContain("agent-discovery");
+    expect(source).toContain("agent-validation");
+    expect(source).toContain("agent-synthesis");
+    expect(source).toContain("report-quality-gate");
+    expect(source).toContain("setAuditPipeline");
   });
 
   it("loads audit history, compares completed audits, and exports PDF per selected audit row", () => {

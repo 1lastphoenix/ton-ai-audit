@@ -39,6 +39,8 @@ import { isUuid } from "@/lib/uuid";
 import { db } from "./db";
 import { getObjectText, putObject } from "./s3";
 
+const FINAL_PDF_VARIANT: PdfExportVariant = "internal";
+
 export async function ensureProjectAccess(projectId: string, userId: string) {
   if (!isUuid(projectId)) {
     return null;
@@ -786,6 +788,14 @@ export async function queryProjectAudits(projectId: string) {
 type AuditHistoryPdfStatus = PdfExportStatus | "not_requested";
 type AuditHistoryPdfStatusByVariant = Record<PdfExportVariant, AuditHistoryPdfStatus>;
 
+function resolveFinalPdfStatus(statusByVariant: AuditHistoryPdfStatusByVariant): AuditHistoryPdfStatus {
+  if (statusByVariant[FINAL_PDF_VARIANT] !== "not_requested") {
+    return statusByVariant[FINAL_PDF_VARIANT];
+  }
+
+  return statusByVariant.client;
+}
+
 export type AuditHistoryItem = {
   id: string;
   revisionId: string;
@@ -973,6 +983,7 @@ export async function queryProjectAuditHistory(projectId: string): Promise<Audit
 
   return audits.map((audit) => {
     const revisionMeta = revisionById.get(audit.revisionId);
+    const statusByVariant = pdfStatusByAuditId.get(audit.id) ?? emptyPdfStatus();
 
     return {
       id: audit.id,
@@ -989,8 +1000,8 @@ export async function queryProjectAuditHistory(projectId: string): Promise<Audit
       primaryModelId: audit.primaryModelId,
       fallbackModelId: audit.fallbackModelId,
       findingCount: findingCountByAuditId.get(audit.id) ?? 0,
-      pdfStatus: (pdfStatusByAuditId.get(audit.id) ?? emptyPdfStatus()).client,
-      pdfStatusByVariant: pdfStatusByAuditId.get(audit.id) ?? emptyPdfStatus()
+      pdfStatus: resolveFinalPdfStatus(statusByVariant),
+      pdfStatusByVariant: statusByVariant
     };
   });
 }
@@ -1152,7 +1163,7 @@ export async function getAuditComparison(params: {
   };
 }
 
-export async function createPdfExport(auditRunId: string, variant: PdfExportVariant = "client") {
+export async function createPdfExport(auditRunId: string, variant: PdfExportVariant = FINAL_PDF_VARIANT) {
   const [record] = await db
     .insert(pdfExports)
     .values({
@@ -1177,9 +1188,17 @@ export async function createPdfExport(auditRunId: string, variant: PdfExportVari
 
 export async function getPdfExportByAudit(
   auditRunId: string,
-  variant: PdfExportVariant = "client"
+  variant: PdfExportVariant = FINAL_PDF_VARIANT
 ) {
-  return db.query.pdfExports.findFirst({
+  const requestedVariant = await db.query.pdfExports.findFirst({
     where: and(eq(pdfExports.auditRunId, auditRunId), eq(pdfExports.variant, variant))
+  });
+
+  if (requestedVariant || variant === "client") {
+    return requestedVariant;
+  }
+
+  return db.query.pdfExports.findFirst({
+    where: and(eq(pdfExports.auditRunId, auditRunId), eq(pdfExports.variant, "client"))
   });
 }

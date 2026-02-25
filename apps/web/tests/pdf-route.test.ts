@@ -59,4 +59,22 @@ describe("pdf export route", () => {
     expect(source).toContain("crypto.randomUUID()");
     expect(source).toContain("const uniqueJobId");
   });
+
+  it("enforces a single final PDF export variant", () => {
+    const routePath = path.resolve(
+      process.cwd(),
+      "app",
+      "api",
+      "projects",
+      "[projectId]",
+      "audits",
+      "[auditId]",
+      "pdf",
+      "route.ts"
+    );
+    const source = fs.readFileSync(routePath, "utf8");
+
+    expect(source).toContain("FINAL_PDF_VARIANT");
+    expect(source).toContain('const FINAL_PDF_VARIANT: PdfExportVariant = "internal"');
+  });
 });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { pdfExportRequestSchema, type PdfExportVariant } from "@ton-audit/shared";
+import { type PdfExportVariant } from "@ton-audit/shared";
 
 import { checkRateLimit, requireSession, toApiErrorResponse } from "@/lib/server/api";
 import {
@@ -14,42 +14,9 @@ import { getObjectSignedUrl } from "@/lib/server/s3";
 
 const PDF_ENQUEUE_COOLDOWN_MS = 30_000;
 const PDF_IN_FLIGHT_SCAN_LIMIT = 256;
+const FINAL_PDF_VARIANT: PdfExportVariant = "internal";
 
-function parsePdfVariant(rawValue: unknown): PdfExportVariant {
-  const parsed = pdfExportRequestSchema.safeParse({ variant: rawValue ?? "client" });
-  if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
-  }
-
-  return parsed.data.variant;
-}
-
-async function resolvePdfVariant(
-  request: Request,
-  options: { allowBody: boolean }
-): Promise<PdfExportVariant> {
-  const queryVariant = new URL(request.url).searchParams.get("variant");
-  if (queryVariant !== null) {
-    return parsePdfVariant(queryVariant);
-  }
-
-  if (options.allowBody && request.headers.get("content-type")?.includes("application/json")) {
-    const body = (await request.json().catch(() => ({}))) as unknown;
-    const parsed = pdfExportRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
-    }
-    return parsed.data.variant;
-  }
-
-  return "client";
-}
-
-async function findInFlightPdfJob(
-  projectId: string,
-  auditRunId: string,
-  variant: PdfExportVariant
-) {
+async function findInFlightPdfJob(projectId: string, auditRunId: string) {
   const jobs = await queues.pdf.getJobs(
     ["active", "waiting", "delayed", "prioritized", "waiting-children"],
     0,
@@ -59,18 +26,7 @@ async function findInFlightPdfJob(
 
   return (
     jobs.find((job) => {
-      const payload = job.data as {
-        projectId?: unknown;
-        auditRunId?: unknown;
-        variant?: unknown;
-      };
-      const jobVariant =
-        typeof payload.variant === "string" ? payload.variant : "client";
-      return (
-        job.data.projectId === projectId &&
-        job.data.auditRunId === auditRunId &&
-        jobVariant === variant
-      );
+      return job.data.projectId === projectId && job.data.auditRunId === auditRunId;
     }) ?? null
   );
 }
@@ -80,7 +36,7 @@ export async function POST(
   context: { params: Promise<{ projectId: string; auditId: string }> }
 ) {
   try {
-    const variant = await resolvePdfVariant(request, { allowBody: true });
+    const variant = FINAL_PDF_VARIANT;
     const session = await requireSession(request);
     // 20 export requests per 10 minutes per user.
     checkRateLimit(session.user.id, "export-pdf", 20, 10 * 60_000);
@@ -122,7 +78,7 @@ export async function POST(
     const lastUpdatedAt =
       existingPdf?.updatedAt instanceof Date ? existingPdf.updatedAt.getTime() : 0;
     const ageMs = lastUpdatedAt ? now - lastUpdatedAt : Number.POSITIVE_INFINITY;
-    const inFlightJob = await findInFlightPdfJob(projectId, audit.id, variant);
+    const inFlightJob = await findInFlightPdfJob(projectId, audit.id);
 
     if (inFlightJob) {
       return NextResponse.json(
@@ -205,7 +161,7 @@ export async function GET(
   context: { params: Promise<{ projectId: string; auditId: string }> }
 ) {
   try {
-    const variant = await resolvePdfVariant(request, { allowBody: false });
+    const variant = FINAL_PDF_VARIANT;
     const session = await requireSession(request);
     const { projectId, auditId } = await context.params;
 

@@ -34,7 +34,7 @@ export const findingLifecycleJobPayloadSchema = z.object({
 export const pdfJobPayloadSchema = z.object({
   projectId: z.string().uuid(),
   auditRunId: z.string().uuid(),
-  variant: pdfExportVariantSchema.default("client"),
+  variant: pdfExportVariantSchema.default("internal"),
   requestedByUserId: z.string().min(1)
 });
 

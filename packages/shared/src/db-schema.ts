@@ -549,7 +549,7 @@ export const pdfExports = pgTable(
       .notNull()
       .references(() => auditRuns.id, { onDelete: "cascade" }),
     status: pdfExportStatusEnum("status").notNull().default("queued"),
-    variant: pdfExportVariantEnum("variant").notNull().default("client"),
+    variant: pdfExportVariantEnum("variant").notNull().default("internal"),
     s3Key: text("s3_key"),
     generatedAt: timestamp("generated_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
