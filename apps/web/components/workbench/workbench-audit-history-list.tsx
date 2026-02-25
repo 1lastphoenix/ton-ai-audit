@@ -25,14 +25,17 @@ type WorkbenchAuditHistoryListProps<TItem extends AuditHistoryListItemBase> = {
   pdfStatusBadgeClass: (status: string) => string;
   toProfileLabel: (profile: "fast" | "deep") => string;
   getPdfStatus: (item: TItem) => string;
-  canExportPdf: (auditStatus?: string | null, pdfStatus?: string | null) => boolean;
+  canExportPdf: (
+    auditStatus?: string | null,
+    pdfStatus?: string | null,
+  ) => boolean;
   onViewAudit: (item: TItem) => void;
   onExportPdf: (auditId: string) => void;
 };
 
-export function WorkbenchAuditHistoryList<TItem extends AuditHistoryListItemBase>(
-  props: WorkbenchAuditHistoryListProps<TItem>,
-) {
+export function WorkbenchAuditHistoryList<
+  TItem extends AuditHistoryListItemBase,
+>(props: WorkbenchAuditHistoryListProps<TItem>) {
   if (!props.items.length) {
     return (
       <div className="text-muted-foreground text-xs">
@@ -50,13 +53,16 @@ export function WorkbenchAuditHistoryList<TItem extends AuditHistoryListItemBase
             key={item.id}
             className={cn(
               "bg-card rounded-md border border-border px-2.5 py-2",
-              item.id === props.selectedAuditId ? "border-primary/50 shadow-sm" : "",
+              item.id === props.selectedAuditId
+                ? "border-primary/50 shadow-sm"
+                : "",
             )}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-foreground truncate text-xs font-medium">
-                  audit {props.shortId(item.id)} · rev {props.shortId(item.revisionId)}
+                  audit {props.shortId(item.id)} · rev{" "}
+                  {props.shortId(item.revisionId)}
                 </div>
                 <div className="text-muted-foreground text-[11px]">
                   {new Date(item.createdAt).toLocaleString()}
@@ -106,12 +112,14 @@ export function WorkbenchAuditHistoryList<TItem extends AuditHistoryListItemBase
                 size="sm"
                 variant="outline"
                 className="h-7 px-2 text-[11px]"
-                disabled={!props.canExportPdf(item.status, pdfStatus) || props.isBusy}
+                disabled={
+                  !props.canExportPdf(item.status, pdfStatus) || props.isBusy
+                }
                 onClick={() => {
                   props.onExportPdf(item.id);
                 }}
               >
-                Final PDF
+                Download Paper
               </Button>
             </div>
           </div>

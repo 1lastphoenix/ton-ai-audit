@@ -3,6 +3,13 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 type FindingTaxonomyTag = {
@@ -71,6 +78,24 @@ export function WorkbenchFindingsPanel(props: WorkbenchFindingsPanelProps) {
             className="h-8 text-xs"
             placeholder="Search findings, summaries, or files"
           />
+        </div>
+
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Select
+            value={props.findingsSeverityFilter}
+            onValueChange={props.onFindingsSeverityFilterChange}
+          >
+            <SelectTrigger className="h-8 w-full min-w-0 text-[11px]" aria-label="Filter findings">
+              <SelectValue placeholder="Filter by severity" />
+            </SelectTrigger>
+            <SelectContent align="start" className="min-w-[12rem]">
+              {props.findingFilterOptions.map((option) => (
+                <SelectItem key={option.id} value={option.id} className="text-xs">
+                  {option.label} ({option.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {props.findingsQuery || props.findingsSeverityFilter !== "all" ? (
             <Button
               type="button"
@@ -82,29 +107,6 @@ export function WorkbenchFindingsPanel(props: WorkbenchFindingsPanelProps) {
               Clear
             </Button>
           ) : null}
-        </div>
-
-        <div className="grid min-w-0 grid-cols-2 gap-1.5">
-          {props.findingFilterOptions.map((option) => (
-            <Button
-              key={option.id}
-              type="button"
-              size="sm"
-              variant={props.findingsSeverityFilter === option.id ? "secondary" : "ghost"}
-              className={cn(
-                "h-auto min-h-8 w-full min-w-0 flex-col items-start gap-0 whitespace-normal rounded-md border px-2 py-1.5 text-left",
-                props.findingsSeverityFilter === option.id
-                  ? props.severityBadgeClass(option.label)
-                  : "border-border bg-card hover:bg-accent/35",
-              )}
-              onClick={() => {
-                props.onFindingsSeverityFilterChange(option.id);
-              }}
-            >
-              <span className="text-[10px] uppercase tracking-wide">{option.label}</span>
-              <span className="text-xs font-semibold">{option.count}</span>
-            </Button>
-          ))}
         </div>
 
         {props.filteredFindings.length === 0 ? (
