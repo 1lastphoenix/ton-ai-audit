@@ -21,6 +21,12 @@ type QueueMap = {
 };
 
 let queueCache: QueueMap | null = null;
+const BULLMQ_RESERVED_SEPARATOR = ":";
+const BULLMQ_SAFE_SEPARATOR = "__";
+
+function toBullMqJobId(jobId: string) {
+  return jobId.replaceAll(BULLMQ_RESERVED_SEPARATOR, BULLMQ_SAFE_SEPARATOR);
+}
 
 function createQueue<Name extends JobStep>(name: Name) {
   return new Queue<JobPayloadMap[Name]>(name, {
@@ -133,25 +139,28 @@ export async function enqueueJob(
   payload: JobPayloadMap[keyof JobPayloadMap],
   jobId: string
 ) {
+  const safeJobId = toBullMqJobId(jobId);
   const current = getQueues();
 
   switch (step) {
     case "ingest":
-      return current.ingest.add(step, payload as JobPayloadMap["ingest"], { jobId });
+      return current.ingest.add(step, payload as JobPayloadMap["ingest"], { jobId: safeJobId });
     case "verify":
-      return current.verify.add(step, payload as JobPayloadMap["verify"], { jobId });
+      return current.verify.add(step, payload as JobPayloadMap["verify"], { jobId: safeJobId });
     case "audit":
-      return current.audit.add(step, payload as JobPayloadMap["audit"], { jobId });
+      return current.audit.add(step, payload as JobPayloadMap["audit"], { jobId: safeJobId });
     case "finding-lifecycle":
-      return current.findingLifecycle.add(step, payload as JobPayloadMap["finding-lifecycle"], { jobId });
+      return current.findingLifecycle.add(step, payload as JobPayloadMap["finding-lifecycle"], {
+        jobId: safeJobId
+      });
     case "pdf":
-      return current.pdf.add(step, payload as JobPayloadMap["pdf"], { jobId });
+      return current.pdf.add(step, payload as JobPayloadMap["pdf"], { jobId: safeJobId });
     case "docs-crawl":
-      return current.docsCrawl.add(step, payload as JobPayloadMap["docs-crawl"], { jobId });
+      return current.docsCrawl.add(step, payload as JobPayloadMap["docs-crawl"], { jobId: safeJobId });
     case "docs-index":
-      return current.docsIndex.add(step, payload as JobPayloadMap["docs-index"], { jobId });
+      return current.docsIndex.add(step, payload as JobPayloadMap["docs-index"], { jobId: safeJobId });
     case "cleanup":
-      return current.cleanup.add(step, payload as JobPayloadMap["cleanup"], { jobId });
+      return current.cleanup.add(step, payload as JobPayloadMap["cleanup"], { jobId: safeJobId });
     default:
       throw new Error(`Unsupported queue step: ${String(step)}`);
   }
