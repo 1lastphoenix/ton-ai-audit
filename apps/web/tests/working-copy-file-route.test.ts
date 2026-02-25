@@ -1,69 +1,59 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  requireSession: vi.fn(),
-  parseJsonBody: vi.fn(),
-  toApiErrorResponse: vi.fn((error: unknown) => {
-    const message = error instanceof Error ? error.message : "unknown";
-    return Response.json({ error: message }, { status: 500 });
-  }),
-  ensureProjectAccess: vi.fn(),
-  ensureWorkingCopyAccess: vi.fn(),
-  findActiveAuditRun: vi.fn(),
-  saveWorkingCopyFile: vi.fn(),
-  dbSelectLimit: vi.fn(),
-  dbSelectWhere: vi.fn(),
-  dbSelectFrom: vi.fn(),
-  dbSelect: vi.fn()
-}));
+vi.mock("@/lib/server/api", async () => {
+  const fixture = await import("./fixtures/server-api-mocks");
+  return fixture.serverApiMockModule;
+});
 
-mocks.dbSelect.mockImplementation(() => ({
-  from: mocks.dbSelectFrom
-}));
+vi.mock("@/lib/server/domain", async () => {
+  const fixture = await import("./fixtures/server-domain-mocks");
+  return fixture.serverDomainMockModule;
+});
 
-mocks.dbSelectFrom.mockImplementation(() => ({
-  where: mocks.dbSelectWhere
-}));
+vi.mock("@/lib/server/db", async () => {
+  const fixture = await import("./fixtures/server-db-mocks");
+  return fixture.serverDbMockModule;
+});
 
-mocks.dbSelectWhere.mockImplementation(() => ({
-  limit: mocks.dbSelectLimit
-}));
-
-vi.mock("@/lib/server/api", () => ({
-  requireSession: mocks.requireSession,
-  parseJsonBody: mocks.parseJsonBody,
-  toApiErrorResponse: mocks.toApiErrorResponse
-}));
-
-vi.mock("@/lib/server/domain", () => ({
-  ensureProjectAccess: mocks.ensureProjectAccess,
-  ensureWorkingCopyAccess: mocks.ensureWorkingCopyAccess,
-  findActiveAuditRun: mocks.findActiveAuditRun,
-  saveWorkingCopyFile: mocks.saveWorkingCopyFile
-}));
-
-vi.mock("@/lib/server/db", () => ({
-  db: {
-    select: mocks.dbSelect
-  }
-}));
-
-import { GET as getWorkingCopyFileRoute, PATCH as patchWorkingCopyFileRoute } from "../app/api/projects/[projectId]/working-copies/[workingCopyId]/file/route";
+import {
+  applyDefaultServerApiMocks,
+  resetServerApiMocks,
+  serverApiMocks
+} from "./fixtures/server-api-mocks";
+import {
+  resetServerDbMocks,
+  serverDbMocks,
+  configureDbSelectLimitChain
+} from "./fixtures/server-db-mocks";
+import {
+  resetServerDomainMocks,
+  serverDomainMocks
+} from "./fixtures/server-domain-mocks";
+import {
+  GET as getWorkingCopyFileRoute,
+  PATCH as patchWorkingCopyFileRoute
+} from "../app/api/projects/[projectId]/working-copies/[workingCopyId]/file/route";
 
 describe("working copy file route", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetServerApiMocks();
+    resetServerDomainMocks();
+    resetServerDbMocks();
 
-    mocks.requireSession.mockResolvedValue({ user: { id: "user-1" } });
-    mocks.ensureProjectAccess.mockResolvedValue({ id: "project-1" });
-    mocks.ensureWorkingCopyAccess.mockResolvedValue({ id: "wc-1" });
-    mocks.findActiveAuditRun.mockResolvedValue(null);
-    mocks.parseJsonBody.mockResolvedValue({
+    applyDefaultServerApiMocks("user-1");
+    configureDbSelectLimitChain();
+
+    serverDomainMocks.ensureProjectAccess.mockResolvedValue({ id: "project-1" });
+    serverDomainMocks.ensureWorkingCopyAccess.mockResolvedValue({ id: "wc-1" });
+    serverDomainMocks.findActiveAuditRun.mockResolvedValue(null);
+
+    serverApiMocks.parseJsonBody.mockResolvedValue({
       path: "contracts/main.tolk",
       content: "fun main() {}",
       language: "tolk"
     });
-    mocks.saveWorkingCopyFile.mockResolvedValue({
+
+    serverDomainMocks.saveWorkingCopyFile.mockResolvedValue({
       path: "contracts/main.tolk",
       content: "fun main() {}",
       language: "tolk"
@@ -71,7 +61,7 @@ describe("working copy file route", () => {
   });
 
   it("blocks PATCH writes while an audit is queued or running", async () => {
-    mocks.findActiveAuditRun.mockResolvedValueOnce({ id: "audit-1" });
+    serverDomainMocks.findActiveAuditRun.mockResolvedValueOnce({ id: "audit-1" });
 
     const response = await patchWorkingCopyFileRoute(
       new Request("http://localhost/file", { method: "PATCH" }),
@@ -85,23 +75,20 @@ describe("working copy file route", () => {
       error: "Cannot modify files while an audit is running for this project.",
       activeAuditRunId: "audit-1"
     });
-    expect(mocks.saveWorkingCopyFile).not.toHaveBeenCalled();
+    expect(serverDomainMocks.saveWorkingCopyFile).not.toHaveBeenCalled();
   });
 
   it("validates GET query and returns 400 when file path is missing", async () => {
-    const response = await getWorkingCopyFileRoute(
-      new Request("http://localhost/file"),
-      {
-        params: Promise.resolve({ projectId: "project-1", workingCopyId: "wc-1" })
-      }
-    );
+    const response = await getWorkingCopyFileRoute(new Request("http://localhost/file"), {
+      params: Promise.resolve({ projectId: "project-1", workingCopyId: "wc-1" })
+    });
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Missing file path" });
   });
 
   it("returns 404 when the requested file does not exist", async () => {
-    mocks.dbSelectLimit.mockResolvedValueOnce([]);
+    serverDbMocks.selectLimit.mockResolvedValueOnce([]);
 
     const response = await getWorkingCopyFileRoute(
       new Request("http://localhost/file?path=contracts/main.tolk"),
@@ -120,7 +107,7 @@ describe("working copy file route", () => {
       language: "tolk",
       content: "fun main() {}"
     };
-    mocks.dbSelectLimit.mockResolvedValueOnce([file]);
+    serverDbMocks.selectLimit.mockResolvedValueOnce([file]);
 
     const response = await getWorkingCopyFileRoute(
       new Request("http://localhost/file?path=contracts/main.tolk"),

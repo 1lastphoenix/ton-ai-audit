@@ -1,42 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  requireSession: vi.fn(),
-  toApiErrorResponse: vi.fn((error: unknown) => {
-    const message = error instanceof Error ? error.message : "unknown";
-    return Response.json({ error: message }, { status: 500 });
-  }),
-  ensureProjectAccess: vi.fn(),
-  queryProjectAuditHistory: vi.fn(),
-  getAuditComparison: vi.fn()
-}));
+vi.mock("@/lib/server/api", async () => {
+  const fixture = await import("./fixtures/server-api-mocks");
+  return fixture.serverApiMockModule;
+});
 
-vi.mock("@/lib/server/api", () => ({
-  requireSession: mocks.requireSession,
-  toApiErrorResponse: mocks.toApiErrorResponse
-}));
+vi.mock("@/lib/server/domain", async () => {
+  const fixture = await import("./fixtures/server-domain-mocks");
+  return fixture.serverDomainMockModule;
+});
 
-vi.mock("@/lib/server/domain", () => ({
-  ensureProjectAccess: mocks.ensureProjectAccess,
-  queryProjectAuditHistory: mocks.queryProjectAuditHistory,
-  getAuditComparison: mocks.getAuditComparison
-}));
-
+import {
+  applyDefaultServerApiMocks,
+  resetServerApiMocks
+} from "./fixtures/server-api-mocks";
+import {
+  resetServerDomainMocks,
+  serverDomainMocks
+} from "./fixtures/server-domain-mocks";
 import { GET as getAuditsRoute } from "../app/api/projects/[projectId]/audits/route";
 import { GET as getAuditCompareRoute } from "../app/api/projects/[projectId]/audits/compare/route";
 
 describe("audits routes", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetServerApiMocks();
+    resetServerDomainMocks();
 
-    mocks.requireSession.mockResolvedValue({ user: { id: "user-1" } });
-    mocks.ensureProjectAccess.mockResolvedValue({ id: "project-1", lifecycleState: "ready" });
-    mocks.queryProjectAuditHistory.mockResolvedValue([]);
-    mocks.getAuditComparison.mockResolvedValue({ kind: "not-found" });
+    applyDefaultServerApiMocks("user-1");
+    serverDomainMocks.ensureProjectAccess.mockResolvedValue({
+      id: "project-1",
+      lifecycleState: "ready"
+    });
+    serverDomainMocks.queryProjectAuditHistory.mockResolvedValue([]);
+    serverDomainMocks.getAuditComparison.mockResolvedValue({ kind: "not-found" });
   });
 
   it("returns 404 when project access is denied for audit history", async () => {
-    mocks.ensureProjectAccess.mockResolvedValueOnce(null);
+    serverDomainMocks.ensureProjectAccess.mockResolvedValueOnce(null);
 
     const response = await getAuditsRoute(new Request("http://localhost/audits"), {
       params: Promise.resolve({ projectId: "project-1" })
@@ -48,14 +48,14 @@ describe("audits routes", () => {
 
   it("returns project audit history for authorized users", async () => {
     const audits = [{ id: "audit-1" }, { id: "audit-2" }];
-    mocks.queryProjectAuditHistory.mockResolvedValueOnce(audits);
+    serverDomainMocks.queryProjectAuditHistory.mockResolvedValueOnce(audits);
 
     const response = await getAuditsRoute(new Request("http://localhost/audits"), {
       params: Promise.resolve({ projectId: "project-1" })
     });
 
     expect(response.status).toBe(200);
-    expect(mocks.queryProjectAuditHistory).toHaveBeenCalledWith("project-1");
+    expect(serverDomainMocks.queryProjectAuditHistory).toHaveBeenCalledWith("project-1");
     await expect(response.json()).resolves.toEqual({ audits });
   });
 
@@ -82,7 +82,7 @@ describe("audits routes", () => {
   });
 
   it("returns 409 when comparison targets are not completed", async () => {
-    mocks.getAuditComparison.mockResolvedValueOnce({
+    serverDomainMocks.getAuditComparison.mockResolvedValueOnce({
       kind: "not-completed",
       fromStatus: "running",
       toStatus: "completed"
@@ -101,8 +101,18 @@ describe("audits routes", () => {
 
   it("returns normalized comparison payload when comparison succeeds", async () => {
     const comparison = {
-      fromAudit: { id: "a-old", revisionId: "r-old", createdAt: "2026-01-01T00:00:00.000Z", findingCount: 1 },
-      toAudit: { id: "a-new", revisionId: "r-new", createdAt: "2026-01-02T00:00:00.000Z", findingCount: 2 },
+      fromAudit: {
+        id: "a-old",
+        revisionId: "r-old",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        findingCount: 1
+      },
+      toAudit: {
+        id: "a-new",
+        revisionId: "r-new",
+        createdAt: "2026-01-02T00:00:00.000Z",
+        findingCount: 2
+      },
       summary: {
         findings: {
           fromTotal: 1,
@@ -130,7 +140,7 @@ describe("audits routes", () => {
       }
     };
 
-    mocks.getAuditComparison.mockResolvedValueOnce({
+    serverDomainMocks.getAuditComparison.mockResolvedValueOnce({
       kind: "ok",
       comparison
     });
@@ -142,7 +152,7 @@ describe("audits routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(comparison);
-    expect(mocks.getAuditComparison).toHaveBeenCalledWith({
+    expect(serverDomainMocks.getAuditComparison).toHaveBeenCalledWith({
       projectId: "project-1",
       fromAuditId: "a-1",
       toAuditId: "a-2"
