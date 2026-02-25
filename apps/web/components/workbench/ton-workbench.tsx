@@ -265,6 +265,13 @@ type RailToggleConfig = {
 };
 
 type RightPanelTab = "findings" | "audit-history";
+type FindingSeverityFilter =
+  | "all"
+  | "critical"
+  | "high"
+  | "medium"
+  | "low"
+  | "other";
 
 const bottomPanelTabConfig = [
   { id: "audit-log", label: "Audit Log", icon: TerminalSquare },
@@ -598,6 +605,22 @@ function normalizeSeverity(severity: string) {
   return severity.trim().toLowerCase();
 }
 
+function toFindingSeverityBucket(
+  severity: string,
+): Exclude<FindingSeverityFilter, "all"> {
+  const normalized = normalizeSeverity(severity);
+  if (
+    normalized === "critical" ||
+    normalized === "high" ||
+    normalized === "medium" ||
+    normalized === "low"
+  ) {
+    return normalized;
+  }
+
+  return "other";
+}
+
 function formatSeverityLabel(severity: string) {
   const normalized = normalizeSeverity(severity);
   if (!normalized) {
@@ -605,21 +628,6 @@ function formatSeverityLabel(severity: string) {
   }
 
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
-
-function severityTone(severity: string) {
-  switch (normalizeSeverity(severity)) {
-    case "critical":
-      return "text-red-700 dark:text-red-300";
-    case "high":
-      return "text-orange-700 dark:text-orange-300";
-    case "medium":
-      return "text-amber-700 dark:text-amber-300";
-    case "low":
-      return "text-sky-700 dark:text-sky-300";
-    default:
-      return "text-foreground";
-  }
 }
 
 function severityBadgeClass(severity: string) {
@@ -1079,6 +1087,9 @@ export function TonWorkbench(props: TonWorkbenchProps) {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("findings");
   const [auditHistory, setAuditHistory] = useState<AuditHistoryItem[]>([]);
   const [isAuditHistoryLoading, setIsAuditHistoryLoading] = useState(false);
+  const [findingsQuery, setFindingsQuery] = useState("");
+  const [findingsSeverityFilter, setFindingsSeverityFilter] =
+    useState<FindingSeverityFilter>("all");
   const [fromCompareAuditId, setFromCompareAuditId] = useState("");
   const [toCompareAuditId, setToCompareAuditId] = useState("");
   const [auditCompareResult, setAuditCompareResult] =
@@ -1283,29 +1294,17 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     };
 
     for (const finding of findings) {
-      const severity = normalizeSeverity(
+      const bucket = toFindingSeverityBucket(
         finding.payloadJson?.severity ?? finding.severity ?? "",
       );
-      if (severity === "critical") {
-        counts.critical += 1;
-        continue;
-      }
-      if (severity === "high") {
-        counts.high += 1;
-        continue;
-      }
-      if (severity === "medium") {
-        counts.medium += 1;
-        continue;
-      }
-      if (severity === "low") {
-        counts.low += 1;
-        continue;
-      }
-      counts.other += 1;
+      counts[bucket] += 1;
     }
 
-    const summary = [
+    const summary: Array<{
+      id: Exclude<FindingSeverityFilter, "all">;
+      label: string;
+      count: number;
+    }> = [
       { id: "critical", label: "Critical", count: counts.critical },
       { id: "high", label: "High", count: counts.high },
       { id: "medium", label: "Medium", count: counts.medium },
@@ -1318,6 +1317,41 @@ export function TonWorkbench(props: TonWorkbenchProps) {
 
     return summary;
   }, [findings]);
+  const findingFilterOptions = useMemo(
+    () => [
+      { id: "all" as const, label: "All", count: findings.length },
+      ...findingSeveritySummary,
+    ],
+    [findingSeveritySummary, findings.length],
+  );
+  const filteredFindings = useMemo(() => {
+    const normalizedQuery = findingsQuery.trim().toLowerCase();
+
+    return findings.filter((finding) => {
+      const severity = finding.payloadJson?.severity ?? finding.severity ?? "";
+      const bucket = toFindingSeverityBucket(severity);
+      if (
+        findingsSeverityFilter !== "all" &&
+        bucket !== findingsSeverityFilter
+      ) {
+        return false;
+      }
+
+      if (!normalizedQuery) {
+        return true;
+      }
+
+      const haystack = [
+        finding.payloadJson?.title ?? "",
+        finding.payloadJson?.summary ?? "",
+        finding.payloadJson?.evidence?.filePath ?? "",
+        severity,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [findings, findingsQuery, findingsSeverityFilter]);
   const isAuditCompareActionDisabled =
     isAuditCompareLoading ||
     !fromCompareAuditId ||
@@ -3802,32 +3836,71 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                 <TabsContent value="findings" className="mt-0 min-h-0 flex-1">
                   <ScrollArea className="h-full px-3 py-3">
                     <div className="space-y-3 pb-1">
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {findingSeveritySummary.map((severitySummary) => (
-                          <div
-                            key={severitySummary.id}
-                            className={cn(
-                              "rounded-md border px-2 py-1.5",
-                              severityBadgeClass(severitySummary.label),
-                            )}
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          value={findingsQuery}
+                          onChange={(event) => {
+                            setFindingsQuery(event.target.value);
+                          }}
+                          className="h-8 text-xs"
+                          placeholder="Search findings, summaries, or files"
+                        />
+                        {findingsQuery || findingsSeverityFilter !== "all" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-[11px]"
+                            onClick={() => {
+                              setFindingsQuery("");
+                              setFindingsSeverityFilter("all");
+                            }}
                           >
-                            <div className="text-[10px] uppercase tracking-wide">
-                              {severitySummary.label}
-                            </div>
-                            <div className="text-sm font-semibold leading-4">
-                              {severitySummary.count}
-                            </div>
-                          </div>
+                            Clear
+                          </Button>
+                        ) : null}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {findingFilterOptions.map((option) => (
+                          <Button
+                            key={option.id}
+                            type="button"
+                            size="sm"
+                            variant={
+                              findingsSeverityFilter === option.id
+                                ? "secondary"
+                                : "ghost"
+                            }
+                            className={cn(
+                              "h-auto min-h-8 flex-col items-start gap-0 rounded-md border px-2 py-1.5 text-left",
+                              findingsSeverityFilter === option.id
+                                ? severityBadgeClass(option.label)
+                                : "border-border bg-card hover:bg-accent/35",
+                            )}
+                            onClick={() => {
+                              setFindingsSeverityFilter(option.id);
+                            }}
+                          >
+                            <span className="text-[10px] uppercase tracking-wide">
+                              {option.label}
+                            </span>
+                            <span className="text-xs font-semibold">
+                              {option.count}
+                            </span>
+                          </Button>
                         ))}
                       </div>
 
-                      {findings.length === 0 ? (
+                      {filteredFindings.length === 0 ? (
                         <div className="bg-card text-muted-foreground rounded-md border border-border px-3 py-2 text-xs">
-                          No findings on this audit revision.
+                          {findings.length === 0
+                            ? "No findings on this audit revision."
+                            : "No findings match your current filters."}
                         </div>
                       ) : (
                         <div className="space-y-2 [content-visibility:auto]">
-                          {findings.map((item) => {
+                          {filteredFindings.map((item) => {
                             const severity = item.payloadJson?.severity ?? item.severity;
                             const title = item.payloadJson?.title ?? "Untitled finding";
                             const summary = item.payloadJson?.summary;

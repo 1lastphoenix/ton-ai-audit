@@ -90,38 +90,41 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
   const updatedAtLabel = formatCalendarDate(project.updatedAt ?? project.createdAt);
   const isFreshProject = updatedAtTimestamp - toEpoch(project.createdAt) <= dayMs;
 
-  const deleteAction = (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button variant="destructive" size="sm" disabled={isDeleting}>
-          <Trash2 className="size-3.5" />
-          {isDeleting ? "Deleting..." : "Delete"}
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete project?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This project will be hidden from the dashboard and its workspace will no longer be accessible.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={isDeleting} onClick={onDelete}>
-            Confirm Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
+  function renderDeleteAction(buttonSize: "xs" | "sm" = "sm") {
+    return (
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="destructive" size={buttonSize} disabled={isDeleting}>
+            <Trash2 className="size-3.5" />
+            {isDeleting ? "Deleting..." : "Delete"}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This project will be hidden from the dashboard and its workspace will no longer be
+              accessible.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={isDeleting} onClick={onDelete}>
+              Confirm Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   if (variant === "list") {
     return (
       <Card className="bg-card/80 border-border/70 py-0 transition-all hover:-translate-y-0.5 hover:shadow-sm">
-        <div className="flex flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 px-3 py-3 sm:gap-4 sm:px-4 sm:py-4 md:flex-row md:items-center md:justify-between">
           <div className="grid gap-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="line-clamp-1 text-base font-medium">{project.name}</h3>
+              <h3 className="line-clamp-1 text-sm font-medium sm:text-base">{project.name}</h3>
               <Badge variant="outline" className="capitalize">
                 {project.lifecycleState}
               </Badge>
@@ -145,14 +148,14 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
             {error ? <p className="text-destructive text-xs">{error}</p> : null}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 self-start md:self-center">
-            <Button asChild size="sm" className="gap-1.5">
+          <div className="flex w-full shrink-0 items-center gap-2 self-start md:w-auto md:self-center">
+            <Button asChild size="xs" className="gap-1.5">
               <Link href={`/projects/${project.id}`}>
                 Open
                 <ExternalLink className="size-3.5" />
               </Link>
             </Button>
-            {deleteAction}
+            {renderDeleteAction("xs")}
           </div>
         </div>
       </Card>
@@ -161,11 +164,11 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
 
   return (
     <Card className="bg-card/80 border-border/70 group relative transition-all hover:-translate-y-1 hover:shadow-md">
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-20 bg-gradient-to-r from-sky-500/20 via-cyan-500/5 to-amber-500/20 opacity-70 blur-2xl transition-opacity duration-300 group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-16 bg-gradient-to-r from-sky-500/20 via-cyan-500/5 to-amber-500/20 opacity-70 blur-2xl transition-opacity duration-300 group-hover:opacity-100 sm:h-20" />
 
-      <CardHeader className="relative gap-3">
+      <CardHeader className="relative gap-2.5 sm:gap-3">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="line-clamp-2 text-base">{project.name}</CardTitle>
+          <CardTitle className="line-clamp-2 text-sm sm:text-base">{project.name}</CardTitle>
           <Badge variant="outline" className="capitalize">
             {project.lifecycleState}
           </Badge>
@@ -177,7 +180,7 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
         </div>
       </CardHeader>
 
-      <CardContent className="relative">
+      <CardContent className="relative px-3 sm:px-4">
         <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
           <CalendarClock className="size-3.5" />
           Created {createdAtLabel}
@@ -186,7 +189,7 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
         {error ? <p className="text-destructive mt-2 text-xs">{error}</p> : null}
       </CardContent>
 
-      <CardFooter className="flex items-center justify-between gap-2">
+      <CardFooter className="flex items-center justify-between gap-2 px-3 py-3 sm:px-4 sm:py-4">
         <Button asChild size="sm" className="gap-1.5">
           <Link href={`/projects/${project.id}`}>
             Open
@@ -194,7 +197,7 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
           </Link>
         </Button>
 
-        {deleteAction}
+        {renderDeleteAction("sm")}
       </CardFooter>
     </Card>
   );

@@ -69,23 +69,25 @@ export default async function DashboardPage() {
     <main className="bg-background text-foreground relative min-h-screen overflow-hidden">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(90%_70%_at_0%_0%,rgba(14,165,233,0.14),transparent_60%),radial-gradient(80%_65%_at_100%_10%,rgba(245,158,11,0.18),transparent_55%),radial-gradient(75%_65%_at_50%_100%,rgba(6,182,212,0.09),transparent_70%)]" />
 
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:px-8">
-        <header className="animate-in fade-in-0 slide-in-from-top-1 relative overflow-hidden rounded-3xl border border-border/70 bg-card/80 p-6 shadow-sm backdrop-blur">
+      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-5 sm:gap-6 sm:px-6 sm:py-8 lg:px-8">
+        <header className="animate-in fade-in-0 slide-in-from-top-1 relative overflow-hidden rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur sm:rounded-3xl sm:p-6">
           <div className="pointer-events-none absolute -right-24 -top-24 size-64 rounded-full bg-sky-500/20 blur-3xl" />
           <div className="pointer-events-none absolute -left-24 bottom-0 size-56 rounded-full bg-amber-500/20 blur-3xl" />
 
-          <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-start">
-            <div className="space-y-4">
+          <div className="relative grid gap-4 sm:gap-6 lg:grid-cols-[1fr_auto] lg:items-start">
+            <div className="space-y-3 sm:space-y-4">
               <Badge variant="outline" className="bg-background/70">
                 Workspace Dashboard
               </Badge>
               <div>
-                <h1 className="text-3xl font-semibold tracking-tight">TON Audit Workspace</h1>
-                <p className="text-muted-foreground mt-2 text-sm">
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                  TON Audit Workspace
+                </h1>
+                <p className="text-muted-foreground mt-2 text-xs sm:text-sm">
                   Manage active projects, monitor recent activity, and jump into reviews faster.
                 </p>
               </div>
-              <div className="text-muted-foreground flex flex-wrap items-center gap-3 text-xs">
+              <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs sm:gap-3">
                 <span>{session.user.email ?? "Authenticated user"}</span>
                 {latestProject ? <span>Latest project: {formatDate(latestProject.createdAt)}</span> : null}
               </div>
@@ -98,44 +100,50 @@ export default async function DashboardPage() {
           </div>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
-            <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
+        <section className="grid gap-2.5 sm:gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <article className="bg-card/80 border-border/70 rounded-2xl border p-3.5 shadow-sm backdrop-blur sm:p-4">
+            <div className="text-muted-foreground flex items-center justify-between text-[11px] uppercase tracking-wide">
               Total projects
               <FolderKanban className="size-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{projectRows.length}</p>
+            <p className="mt-1.5 text-xl font-semibold tracking-tight sm:mt-2 sm:text-2xl">
+              {projectRows.length}
+            </p>
             <p className="text-muted-foreground mt-1 text-xs">Ready workspaces available now</p>
           </article>
 
-          <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
-            <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
+          <article className="bg-card/80 border-border/70 rounded-2xl border p-3.5 shadow-sm backdrop-blur sm:p-4">
+            <div className="text-muted-foreground flex items-center justify-between text-[11px] uppercase tracking-wide">
               Recent cycle
               <Sparkles className="size-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{recentCreationCount}</p>
+            <p className="mt-1.5 text-xl font-semibold tracking-tight sm:mt-2 sm:text-2xl">
+              {recentCreationCount}
+            </p>
             <p className="text-muted-foreground mt-1 text-xs">
               Created within 7 days of the latest workspace
             </p>
           </article>
 
-          <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
-            <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
+          <article className="bg-card/80 border-border/70 rounded-2xl border p-3.5 shadow-sm backdrop-blur sm:p-4">
+            <div className="text-muted-foreground flex items-center justify-between text-[11px] uppercase tracking-wide">
               Latest activity
               <Activity className="size-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{latestActivityCount}</p>
+            <p className="mt-1.5 text-xl font-semibold tracking-tight sm:mt-2 sm:text-2xl">
+              {latestActivityCount}
+            </p>
             <p className="text-muted-foreground mt-1 text-xs">
               Updated within 24h of the most recent project update
             </p>
           </article>
 
-          <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
-            <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
+          <article className="bg-card/80 border-border/70 rounded-2xl border p-3.5 shadow-sm backdrop-blur sm:p-4">
+            <div className="text-muted-foreground flex items-center justify-between text-[11px] uppercase tracking-wide">
               Timeline span
               <Clock3 className="size-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">
+            <p className="mt-1.5 text-xl font-semibold tracking-tight sm:mt-2 sm:text-2xl">
               {timelineSpanDays === null ? "-" : `${timelineSpanDays}d`}
             </p>
             <p className="text-muted-foreground mt-1 text-xs">Difference between newest and oldest project</p>

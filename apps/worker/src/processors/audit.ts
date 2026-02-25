@@ -1,4 +1,4 @@
-import { embed, generateObject } from "ai";
+import { embed, generateText, Output } from "ai";
 import { Job } from "bullmq";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -441,9 +441,9 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
       ].join(" ");
 
       const tryModel = async (modelId: string) =>
-        generateObject({
+        generateText({
           model: openrouter(modelId),
-          schema: generatedAuditSchema,
+          output: Output.object({ schema: generatedAuditSchema }),
           system: systemPrompt,
           prompt
         });
@@ -551,7 +551,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
         });
       }
 
-      const normalizedFindings = modelResult.object.findings.map((finding) =>
+      const normalizedFindings = modelResult.output.findings.map((finding) =>
         ensureCitations(finding, docs)
       );
 
@@ -570,15 +570,15 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
           fallback: auditRun.fallbackModelId
         },
         summary: {
-          overview: modelResult.object.overview,
-          methodology: modelResult.object.methodology,
-          scope: modelResult.object.scope,
+          overview: modelResult.output.overview,
+          methodology: modelResult.output.methodology,
+          scope: modelResult.output.scope,
           severityTotals
         },
         findings: normalizedFindings,
         appendix: {
           references: [...new Set(docs.map((item) => item.sourceUrl))],
-          verificationNotes: modelResult.object.verificationNotes
+          verificationNotes: modelResult.output.verificationNotes
         }
       });
 
@@ -602,7 +602,7 @@ export function createAuditProcessor(deps: { enqueueJob: EnqueueJob }) {
               finishReason: modelResult.finishReason,
               usage: modelResult.usage,
               response: modelResult.response,
-              object: modelResult.object
+              object: modelResult.output
             },
             null,
             2

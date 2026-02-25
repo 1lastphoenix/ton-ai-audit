@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { ArrowDownAZ, CalendarClock, LayoutGrid, List, Search } from "lucide-react";
 
 import { type DashboardProject, ProjectCard } from "@/components/dashboard/project-card";
@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 type SortMode = "newest" | "oldest" | "name";
@@ -55,6 +56,8 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const deferredQuery = useDeferredValue(query);
+  const isFiltering = query !== deferredQuery;
   const latestUpdateTimestamp = useMemo(
     () =>
       projects.length === 0
@@ -79,7 +82,7 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
   }, [latestUpdateTimestamp, projects]);
 
   const filteredProjects = useMemo(() => {
-    const loweredQuery = query.trim().toLowerCase();
+    const loweredQuery = deferredQuery.trim().toLowerCase();
 
     return projects
       .filter((project) => {
@@ -110,10 +113,10 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
 
         return rightCreatedAt - leftCreatedAt;
       });
-  }, [activityFilter, latestUpdateTimestamp, projects, query, sortMode]);
+  }, [activityFilter, deferredQuery, latestUpdateTimestamp, projects, sortMode]);
 
   return (
-    <section className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500 rounded-3xl border border-border/70 bg-card/75 p-4 shadow-sm backdrop-blur sm:p-5">
+    <section className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500 rounded-2xl border border-border/70 bg-card/75 p-3 shadow-sm backdrop-blur sm:rounded-3xl sm:p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="relative w-full max-w-xl">
           <Search className="text-muted-foreground pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
@@ -121,14 +124,14 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search projects by name or slug"
-            className="h-9 pl-9"
+            className="h-8 pl-8.5 text-sm sm:h-9 sm:pl-9"
             aria-label="Search projects"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
           <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-            <SelectTrigger className="h-9 min-w-44">
+            <SelectTrigger className="h-8 min-w-0 flex-1 sm:h-9 sm:min-w-44">
               <SelectValue placeholder="Sort projects" />
             </SelectTrigger>
             <SelectContent>
@@ -149,6 +152,7 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
               }
             }}
             aria-label="Project view mode"
+            className="ml-auto"
           >
             <ToggleGroupItem value="grid" aria-label="Grid view">
               <LayoutGrid />
@@ -160,11 +164,11 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 sm:mt-4 sm:gap-2">
         <Button
           type="button"
           variant={activityFilter === "all" ? "secondary" : "outline"}
-          size="sm"
+          size="xs"
           onClick={() => setActivityFilter("all")}
         >
           All ({filterCounts.all})
@@ -172,7 +176,7 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
         <Button
           type="button"
           variant={activityFilter === "recent" ? "secondary" : "outline"}
-          size="sm"
+          size="xs"
           onClick={() => setActivityFilter("recent")}
         >
           <CalendarClock className="size-3.5" />
@@ -181,7 +185,7 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
         <Button
           type="button"
           variant={activityFilter === "stale" ? "secondary" : "outline"}
-          size="sm"
+          size="xs"
           onClick={() => setActivityFilter("stale")}
         >
           <ArrowDownAZ className="size-3.5" />
@@ -192,7 +196,7 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="xs"
             className="ml-auto"
             onClick={() => {
               setQuery("");
@@ -204,27 +208,31 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
         )}
       </div>
 
-      <div className="text-muted-foreground mt-3 text-xs">
+      <div className="text-muted-foreground mt-2 text-xs sm:mt-3">
+        {isFiltering ? "Filtering..." : null}
+        {isFiltering ? " " : null}
         {filteredProjects.length} result{filteredProjects.length === 1 ? "" : "s"} shown
       </div>
 
-      <div className="mt-4">
+      <div className="mt-3 sm:mt-4">
         {projects.length === 0 ? (
-          <div className="bg-background/60 rounded-2xl border border-dashed p-10 text-center">
+          <div className="bg-background/60 rounded-2xl border border-dashed p-6 text-center sm:p-10">
             <p className="text-sm font-medium">No ready projects yet.</p>
             <p className="text-muted-foreground mt-1 text-sm">
               Create your first project to start auditing smart contracts.
             </p>
           </div>
+        ) : isFiltering ? (
+          <ProjectListSkeleton viewMode={viewMode} />
         ) : filteredProjects.length === 0 ? (
-          <div className="bg-background/60 rounded-2xl border border-dashed p-10 text-center">
+          <div className="bg-background/60 rounded-2xl border border-dashed p-6 text-center sm:p-10">
             <p className="text-sm font-medium">No projects match the current filters.</p>
             <p className="text-muted-foreground mt-1 text-sm">
               Try a different query or reset filters.
             </p>
           </div>
         ) : viewMode === "grid" ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
             {filteredProjects.map((project) => (
               <ProjectCard key={project.id} project={project} variant="grid" />
             ))}
@@ -238,5 +246,47 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
         )}
       </div>
     </section>
+  );
+}
+
+function ProjectListSkeleton({ viewMode }: { viewMode: "grid" | "list" }) {
+  if (viewMode === "list") {
+    return (
+      <div className="grid gap-3">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div
+            key={`list-skeleton-${index}`}
+            className="bg-background/60 rounded-2xl border border-border/60 p-3.5 sm:p-4"
+          >
+            <div className="grid gap-2">
+              <Skeleton className="h-4 w-2/5" />
+              <Skeleton className="h-3 w-1/3" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
+      {Array.from({ length: 6 }, (_, index) => (
+        <div
+          key={`grid-skeleton-${index}`}
+          className="bg-background/60 rounded-2xl border border-border/60 p-3.5 sm:p-4"
+        >
+          <div className="grid gap-2.5">
+            <Skeleton className="h-4 w-3/5" />
+            <Skeleton className="h-3 w-2/5" />
+            <Skeleton className="h-3 w-4/5" />
+            <div className="mt-1 flex items-center gap-2">
+              <Skeleton className="h-6 w-16" />
+              <Skeleton className="h-6 w-16" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
