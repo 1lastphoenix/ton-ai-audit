@@ -41,17 +41,28 @@ export default async function DashboardPage() {
     )
     .orderBy(desc(projects.createdAt));
 
-  const now = Date.now();
-  const newThisWeek = projectRows.filter((project) => now - toEpoch(project.createdAt) <= 7 * dayMs).length;
-  const activeToday = projectRows.filter((project) => now - toEpoch(project.updatedAt) <= dayMs).length;
-  const averageProjectAgeDays =
-    projectRows.length === 0
+  const newestCreatedAt = projectRows.length > 0 ? toEpoch(projectRows[0]!.createdAt) : null;
+  const oldestCreatedAt =
+    projectRows.length > 0 ? toEpoch(projectRows[projectRows.length - 1]!.createdAt) : null;
+  const newestUpdatedAt =
+    projectRows.length > 0
+      ? projectRows.reduce((max, project) => Math.max(max, toEpoch(project.updatedAt)), 0)
+      : null;
+
+  const recentCreationCount =
+    newestCreatedAt === null
+      ? 0
+      : projectRows.filter((project) => newestCreatedAt - toEpoch(project.createdAt) <= 7 * dayMs)
+          .length;
+  const latestActivityCount =
+    newestUpdatedAt === null
+      ? 0
+      : projectRows.filter((project) => newestUpdatedAt - toEpoch(project.updatedAt) <= dayMs)
+          .length;
+  const timelineSpanDays =
+    newestCreatedAt === null || oldestCreatedAt === null
       ? null
-      : Math.round(
-          projectRows.reduce((sum, project) => sum + (now - toEpoch(project.createdAt)), 0) /
-            projectRows.length /
-            dayMs
-        );
+      : Math.max(1, Math.round((newestCreatedAt - oldestCreatedAt) / dayMs));
   const latestProject = projectRows[0] ?? null;
 
   return (
@@ -99,31 +110,35 @@ export default async function DashboardPage() {
 
           <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
             <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
-              New this week
+              Recent cycle
               <Sparkles className="size-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{newThisWeek}</p>
-            <p className="text-muted-foreground mt-1 text-xs">Created in the last 7 days</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight">{recentCreationCount}</p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Created within 7 days of the latest workspace
+            </p>
           </article>
 
           <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
             <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
-              Active today
+              Latest activity
               <Activity className="size-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{activeToday}</p>
-            <p className="text-muted-foreground mt-1 text-xs">Updated within the last 24 hours</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight">{latestActivityCount}</p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Updated within 24h of the most recent project update
+            </p>
           </article>
 
           <article className="bg-card/80 border-border/70 rounded-2xl border p-4 shadow-sm backdrop-blur">
             <div className="text-muted-foreground flex items-center justify-between text-xs uppercase tracking-wide">
-              Avg project age
+              Timeline span
               <Clock3 className="size-4" />
             </div>
             <p className="mt-2 text-2xl font-semibold tracking-tight">
-              {averageProjectAgeDays === null ? "-" : `${averageProjectAgeDays}d`}
+              {timelineSpanDays === null ? "-" : `${timelineSpanDays}d`}
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">Time since workspace creation</p>
+            <p className="text-muted-foreground mt-1 text-xs">Difference between newest and oldest project</p>
           </article>
         </section>
 

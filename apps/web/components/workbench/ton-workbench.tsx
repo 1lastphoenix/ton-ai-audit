@@ -607,6 +607,21 @@ function formatSeverityLabel(severity: string) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function severityTone(severity: string) {
+  switch (normalizeSeverity(severity)) {
+    case "critical":
+      return "text-red-700 dark:text-red-300";
+    case "high":
+      return "text-orange-700 dark:text-orange-300";
+    case "medium":
+      return "text-amber-700 dark:text-amber-300";
+    case "low":
+      return "text-sky-700 dark:text-sky-300";
+    default:
+      return "text-foreground";
+  }
+}
+
 function severityBadgeClass(severity: string) {
   switch (normalizeSeverity(severity)) {
     case "critical":
@@ -3713,390 +3728,490 @@ export function TonWorkbench(props: TonWorkbenchProps) {
           </section>
 
           {isFindingsVisible ? (
-            <aside className="bg-muted/20 min-h-0 overflow-y-auto border-t border-border p-3 lg:border-l lg:border-t-0">
-              <div className="mb-2 flex items-center gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={rightPanelTab === "findings" ? "secondary" : "ghost"}
-                  className="h-6 px-2 text-[11px]"
-                  onClick={() => setRightPanelTab("findings")}
-                >
-                  Findings
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={
-                    rightPanelTab === "audit-history" ? "secondary" : "ghost"
-                  }
-                  className="h-6 px-2 text-[11px]"
-                  onClick={() => setRightPanelTab("audit-history")}
-                >
-                  Audit History
-                </Button>
-              </div>
-
-              {rightPanelTab === "findings" ? (
-                <>
-                  <div className="space-y-2">
-                    {findings.length === 0 ? (
-                      <p className="text-muted-foreground text-xs">
-                        No findings on this audit revision.
+            <aside className="bg-muted/15 min-h-0 overflow-hidden border-t border-border lg:border-l lg:border-t-0">
+              <Tabs
+                value={rightPanelTab}
+                onValueChange={handleRightPanelTabChange}
+                className="h-full gap-0"
+              >
+                <div className="bg-card/40 border-b border-border px-3 pb-3 pt-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-muted-foreground text-[10px] uppercase tracking-[0.12em]">
+                        Review Panel
                       </p>
-                    ) : (
-                      findings.map((item) => (
-                        <Button
-                          key={item.id}
-                          type="button"
-                          variant="ghost"
-                          className="bg-card h-auto w-full justify-start rounded border border-border p-2 text-left text-xs hover:bg-accent/40"
-                          onClick={() => {
-                            const path = item.payloadJson?.evidence?.filePath;
-                            if (path) {
-                              openFileInEditor(path);
-                            }
-                            const line = item.payloadJson?.evidence?.startLine;
-                            if (line && editorRef.current) {
-                              editorRef.current.revealLineInCenter(line);
-                              editorRef.current.setPosition({
-                                lineNumber: line,
-                                column: 1,
-                              });
-                            }
-                          }}
-                        >
-                          <div className="w-full">
-                            <div
-                              className={`font-medium ${severityTone(item.payloadJson?.severity ?? item.severity)}`}
-                            >
-                              {item.payloadJson?.severity ?? item.severity}
-                            </div>
-                            <div className="mt-1">
-                              {item.payloadJson?.title ?? "Untitled finding"}
-                            </div>
-                            <div className="text-muted-foreground mt-1 line-clamp-2">
-                              {item.payloadJson?.summary}
-                            </div>
-                          </div>
-                        </Button>
-                      ))
-                    )}
-                  </div>
-                  {lastError ? (
-                    <p className="text-destructive mt-3 text-xs">{lastError}</p>
-                  ) : null}
-                  <p className="text-muted-foreground mt-3 text-xs">
-                    Open tabs: {openTabs.length}
-                  </p>
-                </>
-              ) : (
-                <div className="space-y-3">
-                  <div className="bg-card rounded border border-border p-2">
-                    <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">
-                      Compare Completed Audits
-                    </div>
-                    {completedAuditHistory.length < 2 ? (
-                      <p className="text-muted-foreground text-xs">
-                        Run at least two completed audits to compare revisions.
+                      <h3 className="text-foreground truncate text-sm font-semibold">
+                        Audit Workspace
+                      </h3>
+                      <p className="text-muted-foreground truncate text-[11px]">
+                        {activeAuditHistoryItem
+                          ? `Selected audit ${shortId(activeAuditHistoryItem.id)}`
+                          : "No audit selected"}
                       </p>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="text-foreground text-[11px]">
-                            From (older)
-                            <select
-                              value={fromCompareAuditId}
-                              onChange={(event) =>
-                                setFromCompareAuditId(event.target.value)
-                              }
-                              className="bg-background mt-1 h-7 w-full rounded border border-border px-2 text-xs"
-                            >
-                              {completedAuditHistory.map((item) => (
-                                <option key={`from-${item.id}`} value={item.id}>
-                                  {shortId(item.id)} · rev{" "}
-                                  {shortId(item.revisionId)} ·{" "}
-                                  {new Date(item.createdAt).toLocaleString()}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="text-foreground text-[11px]">
-                            To (newer)
-                            <select
-                              value={toCompareAuditId}
-                              onChange={(event) =>
-                                setToCompareAuditId(event.target.value)
-                              }
-                              className="bg-background mt-1 h-7 w-full rounded border border-border px-2 text-xs"
-                            >
-                              {completedAuditHistory.map((item) => (
-                                <option key={`to-${item.id}`} value={item.id}>
-                                  {shortId(item.id)} · rev{" "}
-                                  {shortId(item.revisionId)} ·{" "}
-                                  {new Date(item.createdAt).toLocaleString()}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="h-7 w-full text-xs"
-                          disabled={
-                            isAuditCompareLoading ||
-                            !fromCompareAuditId ||
-                            !toCompareAuditId ||
-                            fromCompareAuditId === toCompareAuditId
-                          }
-                          onClick={() => {
-                            void runAuditComparison();
-                          }}
-                        >
-                          {isAuditCompareLoading ? "Comparing..." : "Compare"}
-                        </Button>
-                      </div>
-                    )}
-
-                    {auditCompareResult ? (
-                      <div className="mt-3 space-y-2 text-xs">
-                        <div className="text-muted-foreground">
-                          {shortId(auditCompareResult.fromAudit.id)} (
-                          {new Date(
-                            auditCompareResult.fromAudit.createdAt,
-                          ).toLocaleString()}
-                          ){" -> "}
-                          {shortId(auditCompareResult.toAudit.id)} (
-                          {new Date(
-                            auditCompareResult.toAudit.createdAt,
-                          ).toLocaleString()}
-                          )
-                        </div>
-                        <div className="grid grid-cols-2 gap-1">
-                          <div className="bg-muted/60 rounded p-1.5">
-                            <div className="text-muted-foreground text-[11px]">
-                              New findings
-                            </div>
-                            <div className="text-sm font-medium">
-                              {auditCompareResult.summary.findings.newCount}
-                            </div>
-                          </div>
-                          <div className="bg-muted/60 rounded p-1.5">
-                            <div className="text-muted-foreground text-[11px]">
-                              Resolved findings
-                            </div>
-                            <div className="text-sm font-medium">
-                              {
-                                auditCompareResult.summary.findings
-                                  .resolvedCount
-                              }
-                            </div>
-                          </div>
-                          <div className="bg-muted/60 rounded p-1.5">
-                            <div className="text-muted-foreground text-[11px]">
-                              Persisting
-                            </div>
-                            <div className="text-sm font-medium">
-                              {
-                                auditCompareResult.summary.findings
-                                  .persistingCount
-                              }
-                            </div>
-                          </div>
-                          <div className="bg-muted/60 rounded p-1.5">
-                            <div className="text-muted-foreground text-[11px]">
-                              Severity changed
-                            </div>
-                            <div className="text-sm font-medium">
-                              {
-                                auditCompareResult.summary.findings
-                                  .severityChangedCount
-                              }
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="text-foreground text-[11px] font-medium">
-                            Newly detected
-                          </div>
-                          {auditCompareResult.findings.newlyDetected.length ? (
-                            auditCompareResult.findings.newlyDetected
-                              .slice(0, 8)
-                              .map((item) => (
-                                <div
-                                  key={`new-${item.findingId}`}
-                                  className="text-muted-foreground truncate text-[11px]"
-                                >
-                                  {item.severity} · {item.title} ·{" "}
-                                  {item.filePath}:{item.startLine}
-                                </div>
-                              ))
-                          ) : (
-                            <div className="text-muted-foreground text-[11px]">
-                              None
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="text-foreground text-[11px] font-medium">
-                            Resolved
-                          </div>
-                          {auditCompareResult.findings.resolved.length ? (
-                            auditCompareResult.findings.resolved
-                              .slice(0, 8)
-                              .map((item) => (
-                                <div
-                                  key={`resolved-${item.findingId}`}
-                                  className="text-muted-foreground truncate text-[11px]"
-                                >
-                                  {item.severity} · {item.title} ·{" "}
-                                  {item.filePath}:{item.startLine}
-                                </div>
-                              ))
-                          ) : (
-                            <div className="text-muted-foreground text-[11px]">
-                              None
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="text-foreground text-[11px] font-medium">
-                            Persisting
-                          </div>
-                          {auditCompareResult.findings.persisting.length ? (
-                            auditCompareResult.findings.persisting
-                              .slice(0, 8)
-                              .map((item) => (
-                                <div
-                                  key={`persisting-${item.findingId}`}
-                                  className="text-muted-foreground truncate text-[11px]"
-                                >
-                                  {item.fromSeverity}
-                                  {" -> "}
-                                  {item.toSeverity}
-                                  {" · "}
-                                  {item.title}
-                                  {" · "}
-                                  {item.filePath}:{item.startLine}
-                                </div>
-                              ))
-                          ) : (
-                            <div className="text-muted-foreground text-[11px]">
-                              None
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="text-foreground text-[11px] font-medium">
-                            Files
-                          </div>
-                          <div className="text-muted-foreground text-[11px]">
-                            Added {auditCompareResult.summary.files.addedCount}{" "}
-                            · Removed{" "}
-                            {auditCompareResult.summary.files.removedCount} ·
-                            Unchanged{" "}
-                            {auditCompareResult.summary.files.unchangedCount}
-                          </div>
-                          {auditCompareResult.files.added.length ? (
-                            <div className="text-muted-foreground text-[11px]">
-                              Added:{" "}
-                              {auditCompareResult.files.added
-                                .slice(0, 6)
-                                .join(", ")}
-                            </div>
-                          ) : null}
-                          {auditCompareResult.files.removed.length ? (
-                            <div className="text-muted-foreground text-[11px]">
-                              Removed:{" "}
-                              {auditCompareResult.files.removed
-                                .slice(0, 6)
-                                .join(", ")}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="text-muted-foreground text-[11px] uppercase tracking-wide">
-                      Audit Runs
                     </div>
-                    {isAuditHistoryLoading ? (
-                      <div className="text-muted-foreground text-xs">
-                        Loading audit history...
-                      </div>
-                    ) : auditHistory.length === 0 ? (
-                      <div className="text-muted-foreground text-xs">
-                        No audits yet for this project.
-                      </div>
-                    ) : (
-                      auditHistory.map((item) => (
-                        <div
-                          key={item.id}
-                          className={cn(
-                            "bg-card rounded border border-border p-2",
-                            item.id === auditId ? "border-primary/50" : "",
-                          )}
-                        >
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <span className="text-foreground font-medium">
-                              audit {shortId(item.id)}
-                            </span>
-                            <span className="text-muted-foreground">
-                              rev {shortId(item.revisionId)}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {toAuditStatusLabel(item.status)}
-                            </span>
-                            <span className="text-muted-foreground">
-                              PDF {toPdfStatusLabel(item.pdfStatus)}
-                            </span>
-                          </div>
-                          <div className="text-muted-foreground mt-1 text-[11px]">
-                            {new Date(item.createdAt).toLocaleString()} ·
-                            findings {item.findingCount} · {item.primaryModelId}
-                          </div>
-                          <div className="mt-2 flex items-center gap-1">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[11px]"
-                              onClick={() => {
-                                viewAuditFromHistory(item);
-                              }}
-                            >
-                              View
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[11px]"
-                              disabled={item.status !== "completed" || isBusy}
-                              onClick={() => {
-                                void exportPdfForAudit(item.id);
-                              }}
-                            >
-                              Export PDF
-                            </Button>
-                          </div>
-                        </div>
-                      ))
-                    )}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "h-5 border px-1.5 text-[10px] font-medium",
+                        auditStatusBadgeClass(auditStatus),
+                      )}
+                    >
+                      {toAuditStatusLabel(auditStatus)}
+                    </Badge>
                   </div>
-                  {lastError ? (
-                    <p className="text-destructive text-xs">{lastError}</p>
-                  ) : null}
+
+                  <div className="mt-3 grid grid-cols-3 gap-1.5">
+                    {rightPanelStats.map((stat) => (
+                      <div
+                        key={stat.id}
+                        className="bg-background/70 rounded-md border border-border/80 px-2 py-1.5"
+                      >
+                        <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                          {stat.label}
+                        </div>
+                        <div className="text-foreground text-sm font-semibold leading-4">
+                          {stat.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <TabsList className="mt-3 grid h-8 w-full grid-cols-2">
+                    {rightPanelTabConfig.map((tab) => {
+                      const Icon = tab.icon;
+                      const count =
+                        tab.id === "findings" ? findings.length : auditHistory.length;
+
+                      return (
+                        <TabsTrigger
+                          key={tab.id}
+                          value={tab.id}
+                          className="h-6 gap-1.5 px-2 text-[11px]"
+                        >
+                          <Icon className="size-3.5" />
+                          <span>{tab.label}</span>
+                          <span className="bg-muted text-muted-foreground ml-0.5 rounded-full px-1.5 text-[10px] leading-4">
+                            {count}
+                          </span>
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
                 </div>
-              )}
+
+                <TabsContent value="findings" className="mt-0 min-h-0 flex-1">
+                  <ScrollArea className="h-full px-3 py-3">
+                    <div className="space-y-3 pb-1">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {findingSeveritySummary.map((severitySummary) => (
+                          <div
+                            key={severitySummary.id}
+                            className={cn(
+                              "rounded-md border px-2 py-1.5",
+                              severityBadgeClass(severitySummary.label),
+                            )}
+                          >
+                            <div className="text-[10px] uppercase tracking-wide">
+                              {severitySummary.label}
+                            </div>
+                            <div className="text-sm font-semibold leading-4">
+                              {severitySummary.count}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {findings.length === 0 ? (
+                        <div className="bg-card text-muted-foreground rounded-md border border-border px-3 py-2 text-xs">
+                          No findings on this audit revision.
+                        </div>
+                      ) : (
+                        <div className="space-y-2 [content-visibility:auto]">
+                          {findings.map((item) => {
+                            const severity = item.payloadJson?.severity ?? item.severity;
+                            const title = item.payloadJson?.title ?? "Untitled finding";
+                            const summary = item.payloadJson?.summary;
+                            const filePath = item.payloadJson?.evidence?.filePath;
+                            const line = item.payloadJson?.evidence?.startLine;
+
+                            return (
+                              <Button
+                                key={item.id}
+                                type="button"
+                                variant="ghost"
+                                className="bg-card h-auto w-full justify-start rounded-md border border-border p-2.5 text-left hover:bg-accent/35"
+                                onClick={() => {
+                                  revealFindingInEditor(item);
+                                }}
+                              >
+                                <div className="w-full">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "h-5 border px-1.5 text-[10px] font-medium",
+                                        severityBadgeClass(severity),
+                                      )}
+                                    >
+                                      {formatSeverityLabel(severity)}
+                                    </Badge>
+                                    {filePath ? (
+                                      <span className="text-muted-foreground truncate text-[10px] leading-5">
+                                        {filePath}
+                                        {line ? `:${line}` : ""}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="text-foreground mt-1.5 text-xs font-medium leading-4">
+                                    {title}
+                                  </div>
+                                  {summary ? (
+                                    <div className="text-muted-foreground mt-1 line-clamp-2 text-[11px] leading-4">
+                                      {summary}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {lastError ? (
+                        <p className="text-destructive text-xs">{lastError}</p>
+                      ) : null}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="audit-history" className="mt-0 min-h-0 flex-1">
+                  <ScrollArea className="h-full px-3 py-3">
+                    <div className="space-y-3 pb-1">
+                      <div className="bg-card rounded-lg border border-border p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <h4 className="text-foreground text-xs font-semibold">
+                            Compare Completed Audits
+                          </h4>
+                          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                            {completedAuditHistory.length} completed
+                          </Badge>
+                        </div>
+                        {completedAuditHistory.length < 2 ? (
+                          <p className="text-muted-foreground text-xs">
+                            Run at least two completed audits to compare revisions.
+                          </p>
+                        ) : (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              <label
+                                htmlFor={compareFromSelectId}
+                                className="text-foreground text-[11px]"
+                              >
+                                From (older)
+                                <select
+                                  id={compareFromSelectId}
+                                  value={fromCompareAuditId}
+                                  onChange={(event) =>
+                                    setFromCompareAuditId(event.target.value)
+                                  }
+                                  className="bg-background mt-1 h-8 w-full rounded-md border border-border px-2 text-[11px]"
+                                >
+                                  {completedAuditHistory.map((item) => (
+                                    <option key={`from-${item.id}`} value={item.id}>
+                                      {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
+                                      {new Date(item.createdAt).toLocaleString()}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label
+                                htmlFor={compareToSelectId}
+                                className="text-foreground text-[11px]"
+                              >
+                                To (newer)
+                                <select
+                                  id={compareToSelectId}
+                                  value={toCompareAuditId}
+                                  onChange={(event) =>
+                                    setToCompareAuditId(event.target.value)
+                                  }
+                                  className="bg-background mt-1 h-8 w-full rounded-md border border-border px-2 text-[11px]"
+                                >
+                                  {completedAuditHistory.map((item) => (
+                                    <option key={`to-${item.id}`} value={item.id}>
+                                      {shortId(item.id)} · rev {shortId(item.revisionId)} ·{" "}
+                                      {new Date(item.createdAt).toLocaleString()}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 w-full text-xs"
+                              disabled={isAuditCompareActionDisabled}
+                              onClick={() => {
+                                void runAuditComparison();
+                              }}
+                            >
+                              {isAuditCompareLoading ? "Comparing..." : "Compare Audits"}
+                            </Button>
+                          </div>
+                        )}
+
+                        {auditCompareResult ? (
+                          <div className="mt-3 space-y-2 text-xs">
+                            <div className="text-muted-foreground text-[11px]">
+                              {shortId(auditCompareResult.fromAudit.id)} (
+                              {new Date(
+                                auditCompareResult.fromAudit.createdAt,
+                              ).toLocaleString()}
+                              ) {" -> "} {shortId(auditCompareResult.toAudit.id)} (
+                              {new Date(
+                                auditCompareResult.toAudit.createdAt,
+                              ).toLocaleString()}
+                              )
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                                  New
+                                </div>
+                                <div className="text-sm font-semibold">
+                                  {auditCompareResult.summary.findings.newCount}
+                                </div>
+                              </div>
+                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                                  Resolved
+                                </div>
+                                <div className="text-sm font-semibold">
+                                  {auditCompareResult.summary.findings.resolvedCount}
+                                </div>
+                              </div>
+                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                                  Persisting
+                                </div>
+                                <div className="text-sm font-semibold">
+                                  {auditCompareResult.summary.findings.persistingCount}
+                                </div>
+                              </div>
+                              <div className="bg-muted/70 rounded-md px-2 py-1.5">
+                                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                                  Severity Changed
+                                </div>
+                                <div className="text-sm font-semibold">
+                                  {
+                                    auditCompareResult.summary.findings
+                                      .severityChangedCount
+                                  }
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1 text-[11px]">
+                              <div className="text-foreground font-medium">
+                                Newly detected
+                              </div>
+                              {auditCompareResult.findings.newlyDetected.length ? (
+                                auditCompareResult.findings.newlyDetected
+                                  .slice(0, 6)
+                                  .map((item) => (
+                                    <div
+                                      key={`new-${item.findingId}`}
+                                      className="text-muted-foreground truncate"
+                                    >
+                                      {item.severity} · {item.title} · {item.filePath}:
+                                      {item.startLine}
+                                    </div>
+                                  ))
+                              ) : (
+                                <div className="text-muted-foreground">None</div>
+                              )}
+                            </div>
+
+                            <div className="space-y-1 text-[11px]">
+                              <div className="text-foreground font-medium">
+                                Resolved
+                              </div>
+                              {auditCompareResult.findings.resolved.length ? (
+                                auditCompareResult.findings.resolved
+                                  .slice(0, 6)
+                                  .map((item) => (
+                                    <div
+                                      key={`resolved-${item.findingId}`}
+                                      className="text-muted-foreground truncate"
+                                    >
+                                      {item.severity} · {item.title} · {item.filePath}:
+                                      {item.startLine}
+                                    </div>
+                                  ))
+                              ) : (
+                                <div className="text-muted-foreground">None</div>
+                              )}
+                            </div>
+
+                            <div className="space-y-1 text-[11px]">
+                              <div className="text-foreground font-medium">
+                                Persisting
+                              </div>
+                              {auditCompareResult.findings.persisting.length ? (
+                                auditCompareResult.findings.persisting
+                                  .slice(0, 6)
+                                  .map((item) => (
+                                    <div
+                                      key={`persisting-${item.findingId}`}
+                                      className="text-muted-foreground truncate"
+                                    >
+                                      {item.fromSeverity}
+                                      {" -> "}
+                                      {item.toSeverity}
+                                      {" · "}
+                                      {item.title}
+                                      {" · "}
+                                      {item.filePath}:{item.startLine}
+                                    </div>
+                                  ))
+                              ) : (
+                                <div className="text-muted-foreground">None</div>
+                              )}
+                            </div>
+
+                            <div className="space-y-1 text-[11px]">
+                              <div className="text-foreground font-medium">Files</div>
+                              <div className="text-muted-foreground">
+                                Added {auditCompareResult.summary.files.addedCount} ·
+                                Removed {auditCompareResult.summary.files.removedCount} ·
+                                Unchanged{" "}
+                                {auditCompareResult.summary.files.unchangedCount}
+                              </div>
+                              {auditCompareResult.files.added.length ? (
+                                <div className="text-muted-foreground">
+                                  Added:{" "}
+                                  {auditCompareResult.files.added
+                                    .slice(0, 5)
+                                    .join(", ")}
+                                </div>
+                              ) : null}
+                              {auditCompareResult.files.removed.length ? (
+                                <div className="text-muted-foreground">
+                                  Removed:{" "}
+                                  {auditCompareResult.files.removed
+                                    .slice(0, 5)
+                                    .join(", ")}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-foreground text-xs font-semibold">
+                            Audit Runs
+                          </h4>
+                          {isAuditHistoryLoading ? (
+                            <span className="text-muted-foreground text-[11px]">
+                              Refreshing...
+                            </span>
+                          ) : null}
+                        </div>
+                        {isAuditHistoryLoading && auditHistory.length === 0 ? (
+                          <div className="text-muted-foreground text-xs">
+                            Loading audit history...
+                          </div>
+                        ) : auditHistory.length === 0 ? (
+                          <div className="text-muted-foreground text-xs">
+                            No audits yet for this project.
+                          </div>
+                        ) : (
+                          <div className="space-y-2 [content-visibility:auto]">
+                            {auditHistory.map((item) => (
+                              <div
+                                key={item.id}
+                                className={cn(
+                                  "bg-card rounded-md border border-border px-2.5 py-2",
+                                  item.id === auditId
+                                    ? "border-primary/50 shadow-sm"
+                                    : "",
+                                )}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-foreground truncate text-xs font-medium">
+                                      audit {shortId(item.id)} · rev{" "}
+                                      {shortId(item.revisionId)}
+                                    </div>
+                                    <div className="text-muted-foreground text-[11px]">
+                                      {new Date(item.createdAt).toLocaleString()}
+                                    </div>
+                                  </div>
+                                  <div className="flex shrink-0 flex-col items-end gap-1">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "h-5 border px-1.5 text-[10px] font-medium",
+                                        auditStatusBadgeClass(item.status),
+                                      )}
+                                    >
+                                      {toAuditStatusLabel(item.status)}
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "h-5 border px-1.5 text-[10px] font-medium",
+                                        pdfStatusBadgeClass(item.pdfStatus),
+                                      )}
+                                    >
+                                      PDF {toPdfStatusLabel(item.pdfStatus)}
+                                    </Badge>
+                                  </div>
+                                </div>
+                                <div className="text-muted-foreground mt-1.5 text-[11px]">
+                                  findings {item.findingCount} · {item.primaryModelId}
+                                </div>
+                                <div className="mt-2 flex items-center gap-1.5">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-[11px]"
+                                    onClick={() => {
+                                      viewAuditFromHistory(item);
+                                    }}
+                                  >
+                                    View
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-[11px]"
+                                    disabled={item.status !== "completed" || isBusy}
+                                    onClick={() => {
+                                      void exportPdfForAudit(item.id);
+                                    }}
+                                  >
+                                    Export PDF
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {lastError ? (
+                        <p className="text-destructive text-xs">{lastError}</p>
+                      ) : null}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
             </aside>
           ) : null}
         </div>

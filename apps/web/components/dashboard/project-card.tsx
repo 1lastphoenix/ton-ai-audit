@@ -26,8 +26,7 @@ import {
   CardTitle
 } from "@/components/ui/card";
 
-const hourMs = 60 * 60 * 1_000;
-const dayMs = 24 * hourMs;
+const dayMs = 24 * 60 * 60 * 1_000;
 
 export type DashboardProject = {
   id: string;
@@ -43,21 +42,8 @@ type ProjectCardProps = {
   variant?: "grid" | "list";
 };
 
-function formatRelativeAge(value: string | Date) {
-  const timestamp = new Date(value).getTime();
-  const diff = Date.now() - timestamp;
-
-  if (!Number.isFinite(diff) || diff < 0) {
-    return "just now";
-  }
-  if (diff < hourMs) {
-    return `${Math.max(1, Math.floor(diff / (60 * 1_000)))}m ago`;
-  }
-  if (diff < dayMs) {
-    return `${Math.floor(diff / hourMs)}h ago`;
-  }
-
-  return `${Math.floor(diff / dayMs)}d ago`;
+function toEpoch(value: string | Date) {
+  return new Date(value).getTime();
 }
 
 function formatCalendarDate(value: string | Date) {
@@ -100,8 +86,9 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
   }
 
   const createdAtLabel = formatCalendarDate(project.createdAt);
-  const updatedAtLabel = formatRelativeAge(project.updatedAt ?? project.createdAt);
-  const isNewProject = Date.now() - new Date(project.createdAt).getTime() <= 7 * dayMs;
+  const updatedAtTimestamp = toEpoch(project.updatedAt ?? project.createdAt);
+  const updatedAtLabel = formatCalendarDate(project.updatedAt ?? project.createdAt);
+  const isFreshProject = updatedAtTimestamp - toEpoch(project.createdAt) <= dayMs;
 
   const deleteAction = (
     <AlertDialog>
@@ -138,7 +125,7 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
               <Badge variant="outline" className="capitalize">
                 {project.lifecycleState}
               </Badge>
-              {isNewProject ? <Badge variant="secondary">New</Badge> : null}
+              {isFreshProject ? <Badge variant="secondary">Fresh</Badge> : null}
             </div>
 
             <p className="text-muted-foreground font-mono text-xs">{project.slug}</p>
@@ -185,7 +172,7 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
         </div>
         <p className="text-muted-foreground font-mono text-xs">{project.slug}</p>
         <div className="flex flex-wrap gap-2">
-          {isNewProject ? <Badge variant="secondary">New</Badge> : null}
+          {isFreshProject ? <Badge variant="secondary">Fresh</Badge> : null}
           <Badge variant="ghost">Updated {updatedAtLabel}</Badge>
         </div>
       </CardHeader>

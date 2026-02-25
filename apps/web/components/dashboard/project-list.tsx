@@ -26,12 +26,23 @@ function toEpoch(value: string | Date) {
   return new Date(value).getTime();
 }
 
-function matchesActivityFilter(project: DashboardProject, filter: ActivityFilter) {
+function latestProjectUpdate(project: DashboardProject) {
+  return toEpoch(project.updatedAt ?? project.createdAt);
+}
+
+function matchesActivityFilter(
+  project: DashboardProject,
+  filter: ActivityFilter,
+  latestUpdateTimestamp: number | null
+) {
   if (filter === "all") {
     return true;
   }
+  if (latestUpdateTimestamp === null) {
+    return false;
+  }
 
-  const ageDays = (Date.now() - toEpoch(project.updatedAt ?? project.createdAt)) / dayMs;
+  const ageDays = (latestUpdateTimestamp - latestProjectUpdate(project)) / dayMs;
   if (filter === "recent") {
     return ageDays <= recentWindowDays;
   }
@@ -44,24 +55,35 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const latestUpdateTimestamp = useMemo(
+    () =>
+      projects.length === 0
+        ? null
+        : projects.reduce((latest, project) => Math.max(latest, latestProjectUpdate(project)), 0),
+    [projects]
+  );
 
   const filterCounts = useMemo(() => {
-    const recent = projects.filter((project) => matchesActivityFilter(project, "recent")).length;
-    const stale = projects.filter((project) => matchesActivityFilter(project, "stale")).length;
+    const recent = projects.filter((project) =>
+      matchesActivityFilter(project, "recent", latestUpdateTimestamp)
+    ).length;
+    const stale = projects.filter((project) =>
+      matchesActivityFilter(project, "stale", latestUpdateTimestamp)
+    ).length;
 
     return {
       all: projects.length,
       recent,
       stale
     };
-  }, [projects]);
+  }, [latestUpdateTimestamp, projects]);
 
   const filteredProjects = useMemo(() => {
     const loweredQuery = query.trim().toLowerCase();
 
     return projects
       .filter((project) => {
-        if (!matchesActivityFilter(project, activityFilter)) {
+        if (!matchesActivityFilter(project, activityFilter, latestUpdateTimestamp)) {
           return false;
         }
 
@@ -88,7 +110,7 @@ export function ProjectList({ projects }: { projects: DashboardProject[] }) {
 
         return rightCreatedAt - leftCreatedAt;
       });
-  }, [activityFilter, projects, query, sortMode]);
+  }, [activityFilter, latestUpdateTimestamp, projects, query, sortMode]);
 
   return (
     <section className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500 rounded-3xl border border-border/70 bg-card/75 p-4 shadow-sm backdrop-blur sm:p-5">
