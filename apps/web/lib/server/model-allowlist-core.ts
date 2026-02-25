@@ -1,4 +1,4 @@
-export class ModelAllowlistError extends Error {
+class ModelAllowlistError extends Error {
   statusCode: number;
 
   constructor(message: string, statusCode = 400) {

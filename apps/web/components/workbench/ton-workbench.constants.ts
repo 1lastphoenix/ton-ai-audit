@@ -15,15 +15,6 @@ import type {
 export const DEFAULT_MODEL_ID = "google/gemini-2.5-flash";
 export const DEFAULT_NEW_FILE_NAME = "new-module.tolk";
 
-export const findingSeverityFilters = [
-  "all",
-  "critical",
-  "high",
-  "medium",
-  "low",
-  "other",
-] as const;
-
 export const auditPipelineStageDefinitions = [
   {
     id: "verify-plan",

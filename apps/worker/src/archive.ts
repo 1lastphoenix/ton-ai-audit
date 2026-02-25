@@ -16,7 +16,7 @@ type ArchiveLimits = {
   maxBytes: number;
 };
 
-export type ValidatedArchiveEntry = {
+type ValidatedArchiveEntry = {
   normalizedPath: string;
   sizeBytes: number;
   isTestFile: boolean;

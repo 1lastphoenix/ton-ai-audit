@@ -1,12 +1,12 @@
 import type { FindingTransition } from "@ton-audit/shared";
 
-export type TransitionComputationInput = {
+type TransitionComputationInput = {
   previousFindingIds: string[];
   currentFindingIds: string[];
   previousStatusesByFindingId: Record<string, "opened" | "resolved">;
 };
 
-export type TransitionComputationResult = {
+type TransitionComputationResult = {
   findingId: string;
   transition: FindingTransition;
   currentStatus: "opened" | "resolved";

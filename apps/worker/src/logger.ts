@@ -70,5 +70,3 @@ export const workerLogger = {
     writeLog("error", event, context);
   }
 };
-
-export { serializeError };

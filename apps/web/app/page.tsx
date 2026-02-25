@@ -32,29 +32,6 @@ const platformPillars = [
   },
 ];
 
-const auditFlow = [
-  {
-    title: "Upload revision",
-    detail:
-      "Drop a TON project archive and create an immutable revision snapshot.",
-  },
-  {
-    title: "Run guided analysis",
-    detail:
-      "Execute checks and model-assisted review in a constrained sandbox for safer automation.",
-  },
-  {
-    title: "Triage findings",
-    detail:
-      "Sort by severity, validate exploitability, and annotate business impact with source references.",
-  },
-  {
-    title: "Export client-ready report",
-    detail:
-      "Ship a structured PDF with evidence trails and remediation notes that teams can execute.",
-  },
-];
-
 const reportSignals = [
   "Severity distribution with explicit rationale",
   "Linked code snippets for each finding",

@@ -5,7 +5,7 @@ import { auth } from "./auth";
 import { getEnv } from "./env";
 import { isRateLimited } from "./rate-limit";
 
-export class ApiError extends Error {
+class ApiError extends Error {
   statusCode: number;
 
   constructor(message: string, statusCode = 400) {
@@ -15,7 +15,7 @@ export class ApiError extends Error {
   }
 }
 
-export function jsonError(message: string, status = 400) {
+function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 

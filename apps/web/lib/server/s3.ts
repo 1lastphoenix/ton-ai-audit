@@ -1,7 +1,6 @@
 import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
-  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -183,16 +182,6 @@ export async function putObject(params: {
   });
 
   return s3Client.send(command);
-}
-
-export async function deleteObject(key: string) {
-  const s3Client = getS3Client();
-  return s3Client.send(
-    new DeleteObjectCommand({
-      Bucket: getBucketName(),
-      Key: key
-    })
-  );
 }
 
 export async function getObjectText(key: string): Promise<string | null> {

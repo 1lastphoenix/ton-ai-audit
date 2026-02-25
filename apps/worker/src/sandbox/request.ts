@@ -47,7 +47,7 @@ const sandboxRequestSchema = z.object({
   metadata: sandboxMetadataSchema.optional()
 });
 
-export type SandboxRequest = {
+type SandboxRequest = {
   files: SandboxFile[];
   steps: SandboxStep[];
   metadata?: z.infer<typeof sandboxMetadataSchema>;

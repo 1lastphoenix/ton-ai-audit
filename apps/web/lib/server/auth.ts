@@ -76,7 +76,7 @@ export function mapGitHubProfileToUser(profile: GitHubProfile) {
   };
 }
 
-export function getAuth() {
+function getAuth() {
   if (globalForAuth.auth) {
     return globalForAuth.auth;
   }

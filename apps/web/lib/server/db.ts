@@ -12,7 +12,7 @@ const globalForDb = globalThis as unknown as {
   db?: AppDb;
 };
 
-export function getPool() {
+function getPool() {
   if (globalForDb.pool) {
     return globalForDb.pool;
   }
@@ -50,14 +50,6 @@ function bindIfFunction<T extends object>(instance: T, value: unknown) {
 
   return value;
 }
-
-export const pool = new Proxy({} as Pool, {
-  get(_target, property) {
-    const instance = getPool();
-    const value = Reflect.get(instance, property, instance);
-    return bindIfFunction(instance, value);
-  }
-});
 
 export const db = new Proxy({} as AppDb, {
   get(_target, property) {

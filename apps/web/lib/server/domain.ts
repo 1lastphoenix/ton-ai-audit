@@ -406,34 +406,6 @@ export async function softDeleteProject(params: { projectId: string }) {
   return project ?? null;
 }
 
-export async function markProjectReadyIfInitializing(projectId: string) {
-  const [project] = await db
-    .update(projects)
-    .set({
-      lifecycleState: "ready",
-      deletedAt: null,
-      updatedAt: new Date()
-    })
-    .where(and(eq(projects.id, projectId), eq(projects.lifecycleState, "initializing")))
-    .returning();
-
-  return project ?? null;
-}
-
-export async function markProjectDeletedIfInitializing(projectId: string) {
-  const [project] = await db
-    .update(projects)
-    .set({
-      lifecycleState: "deleted",
-      deletedAt: new Date(),
-      updatedAt: new Date()
-    })
-    .where(and(eq(projects.id, projectId), eq(projects.lifecycleState, "initializing")))
-    .returning();
-
-  return project ?? null;
-}
-
 export async function createRevisionFromUpload(params: {
   projectId: string;
   uploadId: string;
@@ -814,14 +786,6 @@ export async function getLatestProjectState(projectId: string, userId?: string) 
   };
 }
 
-export async function queryProjectAudits(projectId: string) {
-  return db
-    .select()
-    .from(auditRuns)
-    .where(eq(auditRuns.projectId, projectId))
-    .orderBy(desc(auditRuns.createdAt));
-}
-
 type AuditHistoryPdfStatus = PdfExportStatus | "not_requested";
 type AuditHistoryPdfStatusByVariant = Record<PdfExportVariant, AuditHistoryPdfStatus>;
 
@@ -833,7 +797,7 @@ function resolveFinalPdfStatus(statusByVariant: AuditHistoryPdfStatusByVariant):
   return statusByVariant.client;
 }
 
-export type AuditHistoryItem = {
+type AuditHistoryItem = {
   id: string;
   revisionId: string;
   revisionSource: RevisionSource;
@@ -860,7 +824,7 @@ type ComparisonFindingSummary = {
   startLine: number;
 };
 
-export type AuditCompareResponse = {
+type AuditCompareResponse = {
   fromAudit: {
     id: string;
     revisionId: string;
@@ -905,7 +869,7 @@ export type AuditCompareResponse = {
   };
 };
 
-export type AuditCompareResult =
+type AuditCompareResult =
   | {
       kind: "not-found";
     }

@@ -12,7 +12,7 @@ type VerifyStepStatus =
   | "skipped"
   | "timeout";
 
-export type WorkbenchExecutionStage = {
+type WorkbenchExecutionStage = {
   id: string;
   label: string;
   description: string;
@@ -21,7 +21,7 @@ export type WorkbenchExecutionStage = {
   isCurrent: boolean;
 };
 
-export type WorkbenchExecutionVerifyStep = {
+type WorkbenchExecutionVerifyStep = {
   id: string;
   action: string;
   status: VerifyStepStatus;

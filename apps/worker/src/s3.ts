@@ -7,7 +7,7 @@ import {
 
 import { env } from "./env";
 
-export const s3Client = new S3Client({
+const s3Client = new S3Client({
   endpoint: env.MINIO_ENDPOINT,
   forcePathStyle: true,
   region: env.MINIO_REGION,

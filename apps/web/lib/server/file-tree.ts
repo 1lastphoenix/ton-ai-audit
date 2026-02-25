@@ -1,6 +1,6 @@
 import { normalizePath } from "@ton-audit/shared";
 
-export type FileTreeNode = {
+type FileTreeNode = {
   name: string;
   path: string;
   type: "file" | "directory";

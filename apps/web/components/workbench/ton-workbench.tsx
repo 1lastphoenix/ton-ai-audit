@@ -690,11 +690,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     const handleChange = () => {
       computePrefersDark();
     };
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleChange);
-    } else {
-      mediaQuery.addListener(handleChange);
-    }
+    mediaQuery.addEventListener("change", handleChange);
 
     const observer = new MutationObserver(() => {
       computePrefersDark();
@@ -705,11 +701,7 @@ export function TonWorkbench(props: TonWorkbenchProps) {
     });
 
     return () => {
-      if (typeof mediaQuery.removeEventListener === "function") {
-        mediaQuery.removeEventListener("change", handleChange);
-      } else {
-        mediaQuery.removeListener(handleChange);
-      }
+      mediaQuery.removeEventListener("change", handleChange);
       observer.disconnect();
     };
   }, []);

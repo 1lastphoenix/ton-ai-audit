@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { TreeNode } from "@/components/workbench/ton-workbench.types";
 
-export type WorkbenchInlineNewFileDraft = {
+type WorkbenchInlineNewFileDraft = {
   parentPath: string | null;
   value: string;
   isBusy: boolean;

@@ -85,18 +85,6 @@ export function useWorkbenchEvents(params: UseWorkbenchEventsParams) {
     lastBackendEventAtRef.current = Date.now();
   }, []);
 
-  useEffect(() => {
-    if (!auditId || !isAuditInProgress) {
-      return;
-    }
-
-    registerJobIds([
-      toBullMqJobId(`verify:${projectId}:${auditId}`),
-      toBullMqJobId(`audit:${projectId}:${auditId}`),
-      toBullMqJobId(`finding-lifecycle:${projectId}:${auditId}`),
-    ]);
-  }, [auditId, isAuditInProgress, projectId, registerJobIds]);
-
   const activeJobIds = useMemo(() => {
     const ids = [...registeredJobIds];
     if (auditId && isAuditInProgress) {
