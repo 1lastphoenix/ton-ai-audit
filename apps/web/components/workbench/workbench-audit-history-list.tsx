@@ -84,12 +84,8 @@ export function WorkbenchAuditHistoryList<TItem extends AuditHistoryListItemBase
               </div>
             </div>
             <div className="text-muted-foreground mt-1.5 text-[11px]">
-              findings {item.findingCount} · {item.primaryModelId}
-            </div>
-            <div className="mt-1 flex flex-wrap gap-1">
-              <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                {props.toProfileLabel(item.profile ?? "deep")}
-              </Badge>
+              findings {item.findingCount} · {item.primaryModelId} (
+              {props.toProfileLabel(item.profile ?? "deep")})
             </div>
             <div className="mt-2 flex items-center gap-1.5">
               {item.id !== props.selectedAuditId ? (

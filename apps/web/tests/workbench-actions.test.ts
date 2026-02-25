@@ -40,10 +40,18 @@ describe("ton workbench actions", () => {
 
   it("uses one mode toggle button for edit and read-only", () => {
     const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const toolbarPath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-top-toolbar.tsx",
+    );
     const source = fs.readFileSync(filePath, "utf8");
+    const toolbarSource = fs.readFileSync(toolbarPath, "utf8");
 
     expect(source).toContain("toggleEditMode");
-    expect(source).toContain("isEditable ? \"Read-only\" : \"Edit\"");
+    expect(source).toContain("WorkbenchTopToolbar");
+    expect(toolbarSource).toContain('props.isEditable ? "Read-only" : "Edit"');
   });
 
   it("clears file cache ref when revision or working copy context changes", () => {
@@ -140,10 +148,18 @@ describe("ton workbench actions", () => {
       "workbench",
       "workbench-audit-history-list.tsx",
     );
+    const toolbarPath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-top-toolbar.tsx",
+    );
     const source = fs.readFileSync(filePath, "utf8");
     const historySource = fs.readFileSync(historyPath, "utf8");
+    const toolbarSource = fs.readFileSync(toolbarPath, "utf8");
 
-    expect(source).toContain("Audit profile (");
+    expect(source).toContain("WorkbenchTopToolbar");
+    expect(toolbarSource).toContain("Audit profile (");
     expect(source).not.toContain("<Select value={auditProfile}");
     expect(historySource).not.toContain("schema v");
     expect(historySource).not.toContain("legacy-engine");
@@ -160,10 +176,31 @@ describe("ton workbench actions", () => {
   });
 
   it("deduplicates model options before rendering selector items", () => {
-    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const filePath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-top-toolbar.tsx",
+    );
     const source = fs.readFileSync(filePath, "utf8");
 
     expect(source).toContain("normalizeModelAllowlist");
     expect(source).toContain("const modelOptions = normalizeModelAllowlist(props.modelAllowlist)");
+  });
+
+  it("extracts findings tab body into dedicated component", () => {
+    const filePath = path.resolve(process.cwd(), "components", "workbench", "ton-workbench.tsx");
+    const findingsPath = path.resolve(
+      process.cwd(),
+      "components",
+      "workbench",
+      "workbench-findings-panel.tsx",
+    );
+    const source = fs.readFileSync(filePath, "utf8");
+    const findingsSource = fs.readFileSync(findingsPath, "utf8");
+
+    expect(source).toContain("WorkbenchFindingsPanel");
+    expect(findingsSource).toContain("Search findings, summaries, or files");
+    expect(findingsSource).toContain("No findings match your current filters.");
   });
 });

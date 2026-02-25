@@ -20,17 +20,12 @@ import {
   ChevronDown,
   ChevronRight,
   FileCode2,
-  FileDown,
   FilePlus2,
   Folder,
   FolderTree,
   FolderOpen,
-  Lock,
   MoreHorizontal,
-  Pencil,
-  Play,
   RefreshCcw,
-  Save,
   Shield,
   TerminalSquare,
   Upload,
@@ -59,12 +54,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -96,6 +86,8 @@ import {
 } from "@/components/workbench/workbench-ui-utils";
 import { WorkbenchExecutionTracker } from "@/components/workbench/workbench-execution-tracker";
 import { WorkbenchAuditHistoryList } from "@/components/workbench/workbench-audit-history-list";
+import { WorkbenchTopToolbar } from "@/components/workbench/workbench-top-toolbar";
+import { WorkbenchFindingsPanel } from "@/components/workbench/workbench-findings-panel";
 
 type TreeNode = WorkbenchTreeNode;
 
@@ -469,37 +461,6 @@ function normalizeModelAllowlist(models: string[]): string[] {
   }
 
   return uniqueModels;
-}
-
-function ModelSelectorSubmenu(props: {
-  label: string;
-  value: string;
-  keyPrefix: string;
-  modelAllowlist: string[];
-  onValueChange: (value: string) => void;
-}) {
-  const modelOptions = normalizeModelAllowlist(props.modelAllowlist);
-
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>{props.label}</DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="w-64">
-        <DropdownMenuRadioGroup
-          value={props.value}
-          onValueChange={props.onValueChange}
-        >
-          {modelOptions.map((model) => (
-            <DropdownMenuRadioItem
-              key={`${props.keyPrefix}-${model}`}
-              value={model}
-            >
-              {model}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
 }
 
 const MonacoEditor = dynamic(
@@ -4339,221 +4300,60 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                   )}
                 </div>
 
-                <div className="bg-card/80 flex shrink-0 items-center gap-0.5 border-l border-border px-1">
-                  <WorkbenchTooltip
-                    content={
-                      isAuditWriteLocked
-                        ? "Editing locked while audit is running"
-                        : isEditable
-                          ? "Read-only"
-                          : "Edit"
+                <WorkbenchTopToolbar
+                  isAuditWriteLocked={isAuditWriteLocked}
+                  isBusy={isBusy}
+                  isEditable={isEditable}
+                  revisionId={revisionId}
+                  selectedPath={selectedPath}
+                  isSelectedPathDirty={
+                    selectedPath ? dirtyPathSet.has(selectedPath) : false
+                  }
+                  onToggleEditMode={() => {
+                    void toggleEditMode();
+                  }}
+                  onSaveFile={() => {
+                    void saveCurrentFile();
+                  }}
+                  auditProfile={auditProfile}
+                  toProfileLabel={toProfileLabel}
+                  onRunAudit={runAudit}
+                  auditId={auditId}
+                  canExportFinalPdf={
+                    Boolean(auditId) &&
+                    !isBusy &&
+                    (activeAuditHistoryItem
+                      ? canExportAuditPdf(
+                          activeAuditHistoryItem.status,
+                          resolveAuditPdfStatus(activeAuditHistoryItem),
+                        )
+                      : auditStatus === "completed")
+                  }
+                  onExportFinalPdf={() => {
+                    if (!auditId) {
+                      return;
                     }
-                  >
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6 rounded-sm"
-                      disabled={
-                        isAuditWriteLocked ||
-                        isBusy ||
-                        (!isEditable && !revisionId)
-                      }
-                      onClick={() => {
-                        void toggleEditMode();
-                      }}
-                      aria-label={isEditable ? "Read-only" : "Edit"}
-                    >
-                      {isEditable ? (
-                        <Lock className="size-3.5" />
-                      ) : (
-                        <Pencil className="size-3.5" />
-                      )}
-                    </Button>
-                  </WorkbenchTooltip>
-
-                  <WorkbenchTooltip content="Save file">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6 rounded-sm"
-                      disabled={
-                        isAuditWriteLocked ||
-                        !isEditable ||
-                        isBusy ||
-                        !selectedPath ||
-                        !dirtyPathSet.has(selectedPath)
-                      }
-                      onClick={() => {
-                        void saveCurrentFile();
-                      }}
-                      aria-label="Save file"
-                    >
-                      <Save className="size-3.5" />
-                    </Button>
-                  </WorkbenchTooltip>
-
-                  <WorkbenchTooltip
-                    content={`Run ${toProfileLabel(auditProfile)} Audit`}
-                  >
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6 rounded-sm"
-                      disabled={isAuditWriteLocked || !isEditable || isBusy}
-                      onClick={runAudit}
-                      aria-label="Run Audit"
-                    >
-                      <Play className="size-3" />
-                    </Button>
-                  </WorkbenchTooltip>
-
-                  <WorkbenchTooltip content="Export Final Audit PDF">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6 rounded-sm"
-                      disabled={
-                        !auditId ||
-                        isBusy ||
-                        (activeAuditHistoryItem
-                          ? !canExportAuditPdf(
-                              activeAuditHistoryItem.status,
-                              resolveAuditPdfStatus(activeAuditHistoryItem),
-                            )
-                          : auditStatus !== "completed")
-                      }
-                      onClick={() => {
-                        if (!auditId) {
-                          return;
-                        }
-                        void exportPdfForAudit(auditId);
-                      }}
-                      aria-label="Export PDF"
-                    >
-                      <FileDown className="size-3.5" />
-                    </Button>
-                  </WorkbenchTooltip>
-
-                  <WorkbenchTooltip content="Refresh workbench">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6 rounded-sm"
-                      disabled={isBusy || !revisionId}
-                      onClick={refreshWorkbenchData}
-                      aria-label="Refresh workbench"
-                    >
-                      <RefreshCcw className="size-3.5" />
-                    </Button>
-                  </WorkbenchTooltip>
-
-                  <WorkbenchTooltip content="Toggle bottom panel">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant={isBottomPanelVisible ? "secondary" : "ghost"}
-                      className="size-6 rounded-sm"
-                      onClick={() => {
-                        setIsBottomPanelVisible((current) => !current);
-                      }}
-                      aria-label="Toggle bottom panel"
-                    >
-                      <TerminalSquare className="size-3.5" />
-                    </Button>
-                  </WorkbenchTooltip>
-
-                  <WorkbenchTooltip content={`Audit ${auditStatusLabel}`}>
-                    <span
-                      className={cn(
-                        "mx-1 hidden size-1.5 rounded-full md:inline-flex",
-                        auditStatus === "failed"
-                          ? "bg-destructive"
-                          : isAuditInProgress
-                            ? "bg-primary"
-                            : "bg-muted-foreground/50",
-                      )}
-                      aria-hidden="true"
-                    />
-                  </WorkbenchTooltip>
-
-                  {dirtyPaths.length ? (
-                    <WorkbenchTooltip
-                      content={`${dirtyPaths.length} unsaved file(s)`}
-                    >
-                      <span
-                        className="mr-0.5 hidden size-1.5 rounded-full bg-destructive md:inline-flex"
-                        aria-hidden="true"
-                      />
-                    </WorkbenchTooltip>
-                  ) : null}
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        className="size-6 rounded-sm"
-                        aria-label="Workbench options"
-                      >
-                        <MoreHorizontal className="size-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>Workbench</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          router.push("/dashboard");
-                        }}
-                      >
-                        Back to dashboard
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      {modelSelectors.map((selector) => (
-                        <ModelSelectorSubmenu
-                          key={selector.id}
-                          label={selector.label}
-                          value={selector.value}
-                          keyPrefix={selector.keyPrefix}
-                          modelAllowlist={normalizedModelAllowlist}
-                          onValueChange={selector.onValueChange}
-                        />
-                      ))}
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger>
-                          Audit profile ({toProfileLabel(auditProfile)})
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent>
-                          <DropdownMenuRadioGroup
-                            value={auditProfile}
-                            onValueChange={(value) => {
-                              if (value === "fast" || value === "deep") {
-                                setAuditProfile(value);
-                              }
-                            }}
-                          >
-                            <DropdownMenuRadioItem value="deep">
-                              Deep (recommended)
-                            </DropdownMenuRadioItem>
-                            <DropdownMenuRadioItem value="fast">
-                              Fast
-                            </DropdownMenuRadioItem>
-                          </DropdownMenuRadioGroup>
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel className="text-[11px]">
-                        rev {shortId(revisionId)} · audit {shortId(auditId)} ·
-                        LSP {lspStatus} · job {jobState}
-                      </DropdownMenuLabel>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                    void exportPdfForAudit(auditId);
+                  }}
+                  onRefreshWorkbench={refreshWorkbenchData}
+                  isBottomPanelVisible={isBottomPanelVisible}
+                  onToggleBottomPanel={() => {
+                    setIsBottomPanelVisible((current) => !current);
+                  }}
+                  auditStatusLabel={auditStatusLabel}
+                  auditStatus={auditStatus}
+                  isAuditInProgress={isAuditInProgress}
+                  dirtyPathCount={dirtyPaths.length}
+                  onBackToDashboard={() => {
+                    router.push("/dashboard");
+                  }}
+                  modelSelectors={modelSelectors}
+                  modelAllowlist={normalizedModelAllowlist}
+                  onAuditProfileChange={setAuditProfile}
+                  lspStatus={lspStatus}
+                  jobState={jobState}
+                  shortId={shortId}
+                />
               </div>
             </div>
 
@@ -4766,179 +4566,36 @@ export function TonWorkbench(props: TonWorkbenchProps) {
                   value="findings"
                   className="mt-0 min-h-0 min-w-0 flex-1 overflow-hidden"
                 >
-                  <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden px-3 py-3">
-                    <div className="min-w-0 space-y-3 pb-3">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <Input
-                          value={findingsQuery}
-                          onChange={(event) => {
-                            setFindingsQuery(event.target.value);
-                          }}
-                          className="h-8 text-xs"
-                          placeholder="Search findings, summaries, or files"
-                        />
-                        {findingsQuery || findingsSeverityFilter !== "all" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2 text-[11px]"
-                            onClick={() => {
-                              setFindingsQuery("");
-                              setFindingsSeverityFilter("all");
-                            }}
-                          >
-                            Clear
-                          </Button>
-                        ) : null}
-                      </div>
-
-                      <div className="grid min-w-0 grid-cols-2 gap-1.5">
-                        {findingFilterOptions.map((option) => (
-                          <Button
-                            key={option.id}
-                            type="button"
-                            size="sm"
-                            variant={
-                              findingsSeverityFilter === option.id
-                                ? "secondary"
-                                : "ghost"
-                            }
-                            className={cn(
-                              "h-auto min-h-8 w-full min-w-0 flex-col items-start gap-0 whitespace-normal rounded-md border px-2 py-1.5 text-left",
-                              findingsSeverityFilter === option.id
-                                ? severityBadgeClass(option.label)
-                                : "border-border bg-card hover:bg-accent/35",
-                            )}
-                            onClick={() => {
-                              setFindingsSeverityFilter(option.id);
-                            }}
-                          >
-                            <span className="text-[10px] uppercase tracking-wide">
-                              {option.label}
-                            </span>
-                            <span className="text-xs font-semibold">
-                              {option.count}
-                            </span>
-                          </Button>
-                        ))}
-                      </div>
-
-                      {filteredFindings.length === 0 ? (
-                        <div className="bg-card text-muted-foreground rounded-md border border-border px-3 py-2 text-xs">
-                          {findings.length === 0
-                            ? "No findings on this audit revision."
-                            : "No findings match your current filters."}
-                        </div>
-                      ) : (
-                        <div className="space-y-2 [content-visibility:auto]">
-                          {filteredFindings.map((item) => {
-                            const severity = item.payloadJson?.severity ?? item.severity;
-                            const title = item.payloadJson?.title ?? "Untitled finding";
-                            const summary = item.payloadJson?.summary;
-                            const filePath = item.payloadJson?.evidence?.filePath;
-                            const line = item.payloadJson?.evidence?.startLine;
-                            const taxonomy = item.payloadJson?.taxonomy ?? [];
-                            const cvss = item.payloadJson?.cvssV31;
-                            const confidence =
-                              typeof item.payloadJson?.confidence === "number"
-                                ? `${Math.round(item.payloadJson.confidence * 100)}%`
-                                : null;
-                            const fixPriority =
-                              item.payloadJson?.fixPriority?.toUpperCase() ?? null;
-                            const remediation = item.payloadJson?.remediation;
-                            const businessImpact = item.payloadJson?.businessImpact;
-                            const technicalImpact = item.payloadJson?.technicalImpact;
-
-                            return (
-                              <Button
-                                key={item.id}
-                                type="button"
-                                variant="ghost"
-                                className="bg-card h-auto w-full min-w-0 justify-start whitespace-normal rounded-md border border-border p-2.5 text-left hover:bg-accent/35"
-                                onClick={() => {
-                                  revealFindingInEditor(item);
-                                }}
-                              >
-                                <div className="w-full min-w-0">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "h-5 border px-1.5 text-[10px] font-medium",
-                                        severityBadgeClass(severity),
-                                      )}
-                                    >
-                                      {formatSeverityLabel(severity)}
-                                    </Badge>
-                                    {filePath ? (
-                                      <span className="text-muted-foreground max-w-[65%] truncate text-[10px] leading-5">
-                                        {filePath}
-                                        {line ? `:${line}` : ""}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <div className="text-foreground mt-1.5 break-words text-xs font-medium leading-4">
-                                    {title}
-                                  </div>
-                                  {summary ? (
-                                    <div className="text-muted-foreground mt-1 line-clamp-2 break-words text-[11px] leading-4">
-                                      {summary}
-                                    </div>
-                                  ) : null}
-                                  <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-1 text-[10px]">
-                                    {cvss?.baseScore !== undefined ? (
-                                      <span className="rounded border border-border px-1.5 py-0.5">
-                                        CVSS {cvss.baseScore.toFixed(1)}
-                                      </span>
-                                    ) : null}
-                                    {confidence ? (
-                                      <span className="rounded border border-border px-1.5 py-0.5">
-                                        Confidence {confidence}
-                                      </span>
-                                    ) : null}
-                                    {fixPriority ? (
-                                      <span className="rounded border border-border px-1.5 py-0.5">
-                                        {fixPriority}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  {taxonomy.length ? (
-                                    <div className="mt-1.5 flex flex-wrap gap-1">
-                                      {taxonomy.slice(0, 4).map((tag) => (
-                                        <span
-                                          key={`${item.id}-${tag.standard}-${tag.id}`}
-                                          className="text-muted-foreground rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px]"
-                                        >
-                                          {tag.standard.toUpperCase()} {tag.id}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                  {businessImpact || technicalImpact ? (
-                                    <div className="text-muted-foreground mt-1.5 line-clamp-2 text-[10px] leading-4">
-                                      {businessImpact ? `Business: ${businessImpact}` : ""}
-                                      {businessImpact && technicalImpact ? " | " : ""}
-                                      {technicalImpact ? `Technical: ${technicalImpact}` : ""}
-                                    </div>
-                                  ) : null}
-                                  {remediation ? (
-                                    <div className="text-muted-foreground mt-1.5 line-clamp-2 text-[10px] leading-4">
-                                      Fix: {remediation}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {lastError ? (
-                        <p className="text-destructive text-xs">{lastError}</p>
-                      ) : null}
-                    </div>
-                  </div>
+                  <WorkbenchFindingsPanel
+                    findingsQuery={findingsQuery}
+                    findingsSeverityFilter={findingsSeverityFilter}
+                    findingFilterOptions={findingFilterOptions}
+                    findings={findings}
+                    filteredFindings={filteredFindings}
+                    onFindingsQueryChange={setFindingsQuery}
+                    onFindingsSeverityFilterChange={(value) => {
+                      if (
+                        value === "all" ||
+                        value === "critical" ||
+                        value === "high" ||
+                        value === "medium" ||
+                        value === "low" ||
+                        value === "other"
+                      ) {
+                        setFindingsSeverityFilter(value);
+                      }
+                    }}
+                    onClearFindingsFilters={() => {
+                      setFindingsQuery("");
+                      setFindingsSeverityFilter("all");
+                    }}
+                    onRevealFinding={(item) => {
+                      revealFindingInEditor(item as AuditFindingInstance);
+                    }}
+                    severityBadgeClass={severityBadgeClass}
+                    formatSeverityLabel={formatSeverityLabel}
+                    lastError={lastError}
+                  />
                 </TabsContent>
 
                 <TabsContent
