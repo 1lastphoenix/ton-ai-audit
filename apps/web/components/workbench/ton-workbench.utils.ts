@@ -722,6 +722,28 @@ function resolveLspWebSocketUrl(rawUrl?: string) {
   }
 }
 
+function deriveLspSiblingHost(browserHost: string) {
+  const normalizedHost = browserHost.trim().toLowerCase();
+  if (!normalizedHost.includes(".")) {
+    return null;
+  }
+
+  const labels = normalizedHost.split(".").filter(Boolean);
+  if (!labels.length) {
+    return null;
+  }
+
+  if (labels[0] === "lsp") {
+    return normalizedHost;
+  }
+
+  if (labels.length === 2) {
+    return `lsp.${normalizedHost}`;
+  }
+
+  return `lsp.${labels.slice(1).join(".")}`;
+}
+
 export function buildLspWebSocketUrls(rawUrl?: string) {
   const primary = resolveLspWebSocketUrl(rawUrl);
   const candidates = [primary];
@@ -744,11 +766,30 @@ export function buildLspWebSocketUrls(rawUrl?: string) {
         parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
       const browserIsLoopback =
         browserHost === "localhost" || browserHost === "127.0.0.1";
+      const hasLikelyInternalHost =
+        !parsed.hostname.includes(".") && !isLoopbackHost;
 
-      if (isLoopbackHost && browserHost && !browserIsLoopback) {
-        const browserHostCandidate = new URL(primary);
-        browserHostCandidate.hostname = browserHost;
-        candidates.push(browserHostCandidate.toString());
+      if ((isLoopbackHost || hasLikelyInternalHost) && browserHost && !browserIsLoopback) {
+        const browserHostCandidateWithPort = new URL(primary);
+        browserHostCandidateWithPort.hostname = browserHost;
+        candidates.push(browserHostCandidateWithPort.toString());
+
+        const browserHostCandidateDefaultPort = new URL(primary);
+        browserHostCandidateDefaultPort.hostname = browserHost;
+        browserHostCandidateDefaultPort.port = "";
+        candidates.push(browserHostCandidateDefaultPort.toString());
+
+        const browserHostPathCandidate = new URL(browserHostCandidateDefaultPort.toString());
+        browserHostPathCandidate.pathname = "/lsp";
+        candidates.push(browserHostPathCandidate.toString());
+
+        const siblingHost = deriveLspSiblingHost(browserHost);
+        if (siblingHost) {
+          const siblingHostCandidate = new URL(primary);
+          siblingHostCandidate.hostname = siblingHost;
+          siblingHostCandidate.port = "";
+          candidates.push(siblingHostCandidate.toString());
+        }
       }
     }
   } catch {

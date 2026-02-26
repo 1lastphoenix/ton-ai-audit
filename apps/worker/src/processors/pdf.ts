@@ -1049,7 +1049,16 @@ export function createPdfProcessor() {
         }
       });
 
-      browser = await chromium.launch({ headless: true });
+      const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH?.trim();
+      browser = await chromium.launch(
+        chromiumPath
+          ? {
+              headless: true,
+              executablePath: chromiumPath,
+              args: ["--no-sandbox", "--disable-dev-shm-usage"]
+            }
+          : { headless: true }
+      );
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle" });
       const generatedAtLabel = formatDateLabel(report.generatedAt);

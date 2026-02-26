@@ -1,31 +1,29 @@
-FROM mcr.microsoft.com/playwright:v1.56.1-noble
+FROM node:22-alpine
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium-browser
 
-RUN rm -f /usr/local/bin/pnpm /usr/local/bin/pnpx \
+RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont \
+  && rm -f /usr/local/bin/pnpm /usr/local/bin/pnpx \
   && npm install -g pnpm@10.5.2
+
+# Create non-root user before installing dependencies.
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY apps/worker/package.json apps/worker/package.json
-COPY apps/web/package.json apps/web/package.json
-COPY packages/shared/package.json packages/shared/package.json
+COPY --chown=appuser:appgroup package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY --chown=appuser:appgroup apps/worker/package.json apps/worker/package.json
+COPY --chown=appuser:appgroup apps/web/package.json apps/web/package.json
+COPY --chown=appuser:appgroup packages/shared/package.json packages/shared/package.json
+
+USER appuser
 
 RUN pnpm install --frozen-lockfile
 
-# Ensure Chromium is present in-image for PDF rendering jobs.
-RUN pnpm --filter @ton-audit/worker exec playwright install --with-deps chromium
-
-COPY . .
+COPY --chown=appuser:appgroup . .
 
 ENV NODE_ENV=production
-
-RUN chown -R pwuser:pwuser /app
-
-USER pwuser
 
 CMD ["pnpm", "--filter", "@ton-audit/worker", "start"]
