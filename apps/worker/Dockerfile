@@ -18,6 +18,9 @@ COPY --chown=appuser:appgroup apps/worker/package.json apps/worker/package.json
 COPY --chown=appuser:appgroup apps/web/package.json apps/web/package.json
 COPY --chown=appuser:appgroup packages/shared/package.json packages/shared/package.json
 
+# Ensure non-root user can create temp/store files during pnpm install.
+RUN mkdir -p /pnpm /app && chown -R appuser:appgroup /pnpm /app
+
 USER appuser
 
 RUN pnpm install --frozen-lockfile
