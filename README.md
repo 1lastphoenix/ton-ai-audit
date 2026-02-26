@@ -52,6 +52,7 @@ One-liner full local verification:
 - The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.
 - Internal trust-zone services run on `core` internal network.
 - Public-facing services join external proxy network `${PROXY_NETWORK:-dokploy-network}`.
+- Worker PDF export depends on Playwright Chromium; keep `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` in production worker env.
 - In Dokploy, map domains to container internal ports:
   - `web` -> `3000`
   - `lsp-service` -> `3002` (if Monaco browser LSP is enabled)
