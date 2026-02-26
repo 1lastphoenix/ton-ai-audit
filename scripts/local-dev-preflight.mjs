@@ -153,25 +153,25 @@ function runCommandCapture(command, envObject) {
 function runCommand(command, envObject) {
   const result = spawnSync(command, {
     shell: true,
-    encoding: "utf8",
+    stdio: "inherit",
     env: {
       ...process.env,
       ...envObject
     }
   });
 
-  if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-
-  if (result.stderr) {
-    process.stderr.write(result.stderr);
+  if (result.error) {
+    throw result.error;
   }
 
   if (result.status !== 0) {
-    const details = [result.stderr?.trim(), result.stdout?.trim()].filter(Boolean).join("\n");
-    throw new Error(details || `Command failed: ${command}`);
+    throw new Error(`Command failed with exit code ${result.status}: ${command}`);
   }
+}
+
+function logStep(message) {
+  // eslint-disable-next-line no-console
+  console.log(`[preflight] ${message}`);
 }
 
 async function runCommandStreaming(command, envObject) {
@@ -566,7 +566,7 @@ function resetLocalPostgresVolume(envFile, envObject) {
     envObject
   );
   runCommand(
-    `docker compose --env-file "${envFile}" -f docker-compose.yml up -d --build --remove-orphans`,
+    `docker compose --env-file "${envFile}" -f docker-compose.yml up -d --remove-orphans`,
     envObject
   );
 }
@@ -749,24 +749,38 @@ export async function runLocalDevPreflight(options = {}) {
     process.env[key] = value;
   }
 
+  logStep(`Using env file '${envFile}'.`);
+
   const dependenciesReady =
     canResolveWorkspaceModule("next/package.json") &&
     canResolveWorkspaceModule("@aws-sdk/client-s3");
 
   if (!quick || !dependenciesReady) {
+    logStep("Installing workspace dependencies...");
     runCommand("pnpm install --frozen-lockfile", envFromFile);
   }
+  logStep("Validating docker-compose local config...");
   runCommandCapture(`docker compose --env-file "${envFile}" -f docker-compose.yml config`, envFromFile);
   if (!quick) {
+    logStep("Validating docker-compose production config...");
     runCommandCapture(`docker compose --env-file "${envFile}" -f docker-compose.prod.yml config`, envFromFile);
+    logStep("Building local web image for preflight...");
     runCommand("docker build -f apps/web/Dockerfile -t ton-audit-web:local-preflight .", envFromFile);
+    logStep("Building local worker image for preflight...");
     runCommand("docker build -f apps/worker/Dockerfile -t ton-audit-worker:local-preflight .", envFromFile);
   }
 
+  logStep("Checking local compose stack status...");
   const stackRows = getLocalStackRows(envFile, envFromFile);
   if (shouldStartLocalStack(stackRows)) {
+    const composeUpFlags = quick ? "--remove-orphans" : "--build --remove-orphans";
+    logStep(
+      quick
+        ? "Starting local compose stack..."
+        : "Starting local compose stack with image rebuilds (this may take a few minutes)..."
+    );
     runCommand(
-      `docker compose --env-file "${envFile}" -f docker-compose.yml up -d --build --remove-orphans`,
+      `docker compose --env-file "${envFile}" -f docker-compose.yml up -d ${composeUpFlags}`,
       envFromFile
     );
   } else {
@@ -774,11 +788,15 @@ export async function runLocalDevPreflight(options = {}) {
     console.log("Local compose stack already running and healthy; skipping docker compose up.");
   }
 
+  logStep("Waiting for Postgres service...");
   await waitForServiceReady(envFile, envFromFile, "postgres");
+  logStep("Waiting for MinIO liveness endpoint...");
   await waitForHttpOk(`${trimTrailingSlash(envFromFile.MINIO_ENDPOINT)}/minio/health/live`);
+  logStep("Validating MinIO credentials...");
   await validateMinioCredentials(envFromFile);
 
   try {
+    logStep("Running database migrations...");
     runCommand("pnpm db:migrate", envFromFile);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -790,17 +808,25 @@ export async function runLocalDevPreflight(options = {}) {
     console.log(`${recoveryReason} Recreating local compose volumes and retrying once.`);
 
     resetLocalPostgresVolume(envFile, envFromFile);
+    logStep("Waiting for Postgres after volume reset...");
     await waitForServiceReady(envFile, envFromFile, "postgres");
+    logStep("Re-running database migrations...");
     runCommand("pnpm db:migrate", envFromFile);
   }
 
+  logStep("Waiting for sandbox runner health endpoint...");
   await waitForHttpOk("http://localhost:3003/health");
+  logStep("Waiting for TON LSP readiness...");
   await waitForTonLspReady("http://localhost:3002/health");
 
   if (!quick) {
+    logStep("Running lint checks...");
     runCommand("pnpm lint", envFromFile);
+    logStep("Running type checks...");
     runCommand("pnpm typecheck", envFromFile);
+    logStep("Running tests...");
     runCommand("pnpm test", envFromFile);
+    logStep("Running production build...");
     runCommand("pnpm build", getBuildEnv(envFromFile));
   }
 
