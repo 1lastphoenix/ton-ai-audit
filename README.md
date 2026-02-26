@@ -47,6 +47,7 @@ One-liner full local verification:
 - Set `REDIS_HOST=tonaudit-redis` and `MINIO_HOST=tonaudit-minio` (defaults) to avoid cross-stack service-name collisions.
 - `DATABASE_URL` is auto-derived from `DB_PASSWORD`, `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_HOST` unless you explicitly override it.
 - `REDIS_URL` and `MINIO_ENDPOINT` default to `REDIS_HOST` / `MINIO_HOST` unless explicitly overridden.
+- Set `MINIO_PUBLIC_ENDPOINT` to a browser-reachable storage URL in production when `MINIO_ENDPOINT` is internal-only (for presigned upload/download links).
 - Leave `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` unset to reuse root credentials by default; if you set app creds, set both and keep them aligned with `minio-init`.
 - A one-shot `migrate` service runs Drizzle migrations and `web`/`worker` wait for it to complete successfully.
 - The production compose file does not publish host ports; all ingress should be handled by Dokploy/Traefik.

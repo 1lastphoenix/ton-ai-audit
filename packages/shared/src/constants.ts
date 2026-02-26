@@ -232,6 +232,7 @@ export const envConfigSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   MINIO_ENDPOINT: z.string().min(1),
+  MINIO_PUBLIC_ENDPOINT: z.string().min(1).optional(),
   MINIO_REGION: z.string().default("us-east-1"),
   MINIO_ACCESS_KEY: z.string().min(1),
   MINIO_SECRET_KEY: z.string().min(1),

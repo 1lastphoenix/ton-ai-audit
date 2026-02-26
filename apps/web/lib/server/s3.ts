@@ -14,16 +14,15 @@ import { getEnv } from "./env";
 
 const globalForS3 = globalThis as unknown as {
   s3Client?: S3Client;
+  s3ClientEndpoint?: string;
+  s3PublicClient?: S3Client;
+  s3PublicClientEndpoint?: string;
 };
 
-function getS3Client() {
-  if (globalForS3.s3Client) {
-    return globalForS3.s3Client;
-  }
-
+function createS3Client(endpoint: string) {
   const env = getEnv();
-  const client = new S3Client({
-    endpoint: env.MINIO_ENDPOINT,
+  return new S3Client({
+    endpoint,
     forcePathStyle: true,
     region: env.MINIO_REGION,
     credentials: {
@@ -31,9 +30,47 @@ function getS3Client() {
       secretAccessKey: env.MINIO_SECRET_KEY
     }
   });
+}
+
+function getS3Client() {
+  const env = getEnv();
+  const endpoint = env.MINIO_ENDPOINT;
+
+  if (
+    globalForS3.s3Client &&
+    globalForS3.s3ClientEndpoint &&
+    globalForS3.s3ClientEndpoint === endpoint
+  ) {
+    return globalForS3.s3Client;
+  }
+
+  const client = createS3Client(endpoint);
 
   if (env.NODE_ENV !== "production") {
     globalForS3.s3Client = client;
+    globalForS3.s3ClientEndpoint = endpoint;
+  }
+
+  return client;
+}
+
+function getS3PublicClient() {
+  const env = getEnv();
+  const endpoint = env.MINIO_PUBLIC_ENDPOINT ?? env.MINIO_ENDPOINT;
+
+  if (
+    globalForS3.s3PublicClient &&
+    globalForS3.s3PublicClientEndpoint &&
+    globalForS3.s3PublicClientEndpoint === endpoint
+  ) {
+    return globalForS3.s3PublicClient;
+  }
+
+  const client = createS3Client(endpoint);
+
+  if (env.NODE_ENV !== "production") {
+    globalForS3.s3PublicClient = client;
+    globalForS3.s3PublicClientEndpoint = endpoint;
   }
 
   return client;
@@ -97,7 +134,7 @@ export async function getMultipartUploadPartSignedUrl(params: {
   uploadId: string;
   partNumber: number;
 }) {
-  const s3Client = getS3Client();
+  const s3Client = getS3PublicClient();
   const command = new UploadPartCommand({
     Bucket: getBucketName(),
     Key: params.key,
@@ -113,7 +150,7 @@ export async function getPutObjectSignedUrl(params: {
   contentType: string;
   expiresInSeconds?: number;
 }) {
-  const s3Client = getS3Client();
+  const s3Client = getS3PublicClient();
   const command = new PutObjectCommand({
     Bucket: getBucketName(),
     Key: params.key,
@@ -144,7 +181,7 @@ export async function completeMultipartUpload(params: {
 }
 
 export async function getObjectSignedUrl(key: string, expiresInSeconds = 900) {
-  const s3Client = getS3Client();
+  const s3Client = getS3PublicClient();
   const command = new GetObjectCommand({
     Bucket: getBucketName(),
     Key: key
