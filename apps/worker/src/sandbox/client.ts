@@ -6,24 +6,29 @@ import type {
   SandboxExecutionProgressEvent,
   SandboxExecutionResponse,
   SandboxFile,
-  SandboxPlan
+  SandboxPlan,
+  SandboxStepAction
 } from "./types";
 
 import { env } from "../env";
 import { summarizeSandboxResults } from "./summary";
 
+const sandboxStepActions = [
+  "bootstrap-create-ton",
+  "blueprint-build",
+  "blueprint-test",
+  "tact-check",
+  "func-check",
+  "tolk-check",
+  "security-rules-scan",
+  "security-surface-scan"
+] as const satisfies readonly SandboxStepAction[];
+
+const sandboxStepActionSet = new Set<SandboxStepAction>(sandboxStepActions);
+
 const sandboxStepResultSchema = z.object({
   id: z.string(),
-  action: z.enum([
-    "bootstrap-create-ton",
-    "blueprint-build",
-    "blueprint-test",
-    "tact-check",
-    "func-check",
-    "tolk-check",
-    "security-rules-scan",
-    "security-surface-scan"
-  ]),
+  action: z.enum(sandboxStepActions),
   command: z.string(),
   args: z.array(z.string()),
   status: z.enum(["completed", "failed", "skipped", "timeout"]),
@@ -96,6 +101,46 @@ const sandboxProgressStreamEventSchema = z.discriminatedUnion("type", [
 const SANDBOX_REQUEST_TIMEOUT_FLOOR_MS = 120_000;
 const SANDBOX_REQUEST_TIMEOUT_BUFFER_MS = 15_000;
 const SANDBOX_REQUEST_TIMEOUT_CAP_MS = DEFAULT_AUDIT_TIMEOUT_MS - 10_000;
+
+function parseSandboxErrorMessage(body: string) {
+  const trimmedBody = body.trim();
+  if (!trimmedBody) {
+    return "";
+  }
+
+  try {
+    const payload = JSON.parse(trimmedBody) as { error?: unknown };
+    if (payload && typeof payload === "object" && typeof payload.error === "string") {
+      return payload.error;
+    }
+  } catch {
+    // body is not JSON
+  }
+
+  return trimmedBody;
+}
+
+function extractUnsupportedSandboxAction(
+  status: number,
+  body: string
+): SandboxStepAction | null {
+  if (status !== 400) {
+    return null;
+  }
+
+  const message = parseSandboxErrorMessage(body);
+  const match = /invalid step action:\s*([a-z0-9-]+)/i.exec(message);
+  if (!match) {
+    return null;
+  }
+
+  const action = match[1]?.trim().toLowerCase();
+  if (!action || !sandboxStepActionSet.has(action as SandboxStepAction)) {
+    return null;
+  }
+
+  return action as SandboxStepAction;
+}
 
 function resolveSandboxRequestTimeoutMs(plan: SandboxPlan) {
   const stepBudgetMs = plan.steps.reduce((total, step) => {
@@ -207,53 +252,88 @@ export async function executeSandboxPlan(params: {
     };
   }
 
-  const timeoutMs = resolveSandboxRequestTimeoutMs(params.plan);
-  let response: Response;
-  try {
-    response = await fetch(`${env.SANDBOX_RUNNER_URL}/execute`, {
-      method: "POST",
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/x-ndjson, application/json",
-        "x-sandbox-stream": "1"
-      },
-      body: JSON.stringify({
-        files: params.files,
-        steps: params.plan.steps,
-        metadata: {
-          projectId: params.projectId,
-          revisionId: params.revisionId,
-          adapter: params.plan.adapter,
-          bootstrapMode: params.plan.bootstrapMode,
-          seedTemplate: params.plan.seedTemplate
-        }
-      })
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new Error(`Sandbox runner request timed out after ${timeoutMs}ms`);
+  let activePlan = params.plan;
+  const unsupportedActions = new Set<SandboxStepAction>();
+
+  while (activePlan.steps.length > 0) {
+    const timeoutMs = resolveSandboxRequestTimeoutMs(activePlan);
+    let response: Response;
+    try {
+      response = await fetch(`${env.SANDBOX_RUNNER_URL}/execute`, {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/x-ndjson, application/json",
+          "x-sandbox-stream": "1"
+        },
+        body: JSON.stringify({
+          files: params.files,
+          steps: activePlan.steps,
+          metadata: {
+            projectId: params.projectId,
+            revisionId: params.revisionId,
+            adapter: activePlan.adapter,
+            bootstrapMode: activePlan.bootstrapMode,
+            seedTemplate: activePlan.seedTemplate
+          }
+        })
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new Error(`Sandbox runner request timed out after ${timeoutMs}ms`);
+      }
+      throw error;
     }
-    throw error;
+
+    if (!response.ok) {
+      const body = await response.text();
+      const unsupportedAction = extractUnsupportedSandboxAction(response.status, body);
+      if (
+        unsupportedAction &&
+        activePlan.steps.some((step) => step.action === unsupportedAction) &&
+        !unsupportedActions.has(unsupportedAction)
+      ) {
+        unsupportedActions.add(unsupportedAction);
+        activePlan = {
+          ...activePlan,
+          steps: activePlan.steps.filter((step) => step.action !== unsupportedAction)
+        };
+        continue;
+      }
+
+      throw new Error(`Sandbox runner request failed: ${response.status} ${body}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    let execution: SandboxExecutionResponse;
+    if (contentType.includes("application/x-ndjson")) {
+      execution = await parseSandboxNdjsonStream(response, params.onProgress);
+    } else {
+      const payload = await response.json();
+      const parsed = sandboxExecutionResponseSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
+      }
+      execution = parsed.data;
+    }
+
+    if (unsupportedActions.size > 0) {
+      return {
+        ...execution,
+        unsupportedActions: [...unsupportedActions]
+      };
+    }
+
+    return execution;
   }
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Sandbox runner request failed: ${response.status} ${body}`);
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/x-ndjson")) {
-    return parseSandboxNdjsonStream(response, params.onProgress);
-  }
-
-  const payload = await response.json();
-  const parsed = sandboxExecutionResponseSchema.safeParse(payload);
-  if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
-  }
-
-  return parsed.data;
+  return {
+    workspaceId: `${params.projectId}:${params.revisionId}`,
+    mode: "local",
+    results: [],
+    unsupportedActions: [...unsupportedActions]
+  };
 }
 
 export { summarizeSandboxResults };

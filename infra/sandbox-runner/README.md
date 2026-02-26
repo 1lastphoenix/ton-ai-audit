@@ -10,7 +10,7 @@ Isolated execution service for TON verification steps.
 `POST /execute` accepts:
 
 - `files[]`: `{ path, content }`
-- `steps[]`: action-based steps (`bootstrap-create-ton`, `blueprint-build`, `blueprint-test`, `tact-check`, `func-check`, `tolk-check`)
+- `steps[]`: action-based steps (`bootstrap-create-ton`, `blueprint-build`, `blueprint-test`, `tact-check`, `func-check`, `tolk-check`, `security-rules-scan`, `security-surface-scan`)
 - `metadata`: adapter/bootstrap hints
 
 Free-form shell commands are intentionally not accepted.

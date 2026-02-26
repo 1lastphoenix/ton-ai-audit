@@ -35,6 +35,11 @@ export const localComposeServices = [
   "lsp-service"
 ];
 
+export const requiredSandboxActions = [
+  "security-rules-scan",
+  "security-surface-scan"
+];
+
 function getWorkspaceRequireCandidates() {
   const candidates = [
     path.resolve(process.cwd(), "apps", "web", "package.json"),
@@ -318,6 +323,148 @@ function trimTrailingSlash(value) {
 
 function hasNonEmptyValue(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function resolveSandboxRunnerBaseUrl(envObject) {
+  const explicitUrl = trimTrailingSlash(envObject.SANDBOX_RUNNER_URL);
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+
+  const sandboxPort = envObject.SANDBOX_PORT?.trim() || "3003";
+  return `http://localhost:${sandboxPort}`;
+}
+
+function extractSandboxRunnerErrorMessage(bodyText) {
+  if (typeof bodyText !== "string" || !bodyText.trim()) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed &&
+      typeof parsed.error === "string"
+    ) {
+      return parsed.error;
+    }
+  } catch {
+    // keep raw body text
+  }
+
+  return bodyText;
+}
+
+function isInvalidSandboxActionError(message, action) {
+  if (typeof message !== "string" || typeof action !== "string") {
+    return false;
+  }
+
+  const escapedAction = action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`invalid step action:\\s*${escapedAction}\\b`, "i").test(message);
+}
+
+async function sandboxRunnerSupportsAction(baseUrl, action, timeoutMs = 15_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(`${baseUrl}/execute`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        files: [],
+        steps: [
+          {
+            id: `capability-${action}`,
+            action,
+            timeoutMs: 1_000,
+            optional: true
+          }
+        ],
+        metadata: {
+          adapter: "none",
+          bootstrapMode: "none",
+          seedTemplate: "tact-empty"
+        }
+      })
+    });
+
+    if (response.ok) {
+      return true;
+    }
+
+    const bodyText = await response.text();
+    const errorMessage = extractSandboxRunnerErrorMessage(bodyText);
+    if (isInvalidSandboxActionError(errorMessage, action)) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function ensureSandboxRunnerActionSupport(
+  envFile,
+  envObject,
+  requiredActions = requiredSandboxActions
+) {
+  if (!Array.isArray(requiredActions) || requiredActions.length === 0) {
+    return;
+  }
+
+  const baseUrl = resolveSandboxRunnerBaseUrl(envObject);
+  const unsupportedActions = [];
+  for (const action of requiredActions) {
+    // Sequential probing keeps runner load low during startup.
+    // eslint-disable-next-line no-await-in-loop
+    const supported = await sandboxRunnerSupportsAction(baseUrl, action);
+    if (!supported) {
+      unsupportedActions.push(action);
+    }
+  }
+
+  if (unsupportedActions.length === 0) {
+    return;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `Sandbox runner is missing action support (${unsupportedActions.join(", ")}). ` +
+      "Rebuilding sandbox-runner service."
+  );
+  runCommand(
+    `docker compose --env-file "${envFile}" -f docker-compose.yml up -d --build --no-deps sandbox-runner`,
+    envObject
+  );
+  await waitForServiceReady(envFile, envObject, "sandbox-runner");
+  await waitForHttpOk(`${baseUrl}/health`);
+
+  const remainingUnsupported = [];
+  for (const action of requiredActions) {
+    // eslint-disable-next-line no-await-in-loop
+    const supported = await sandboxRunnerSupportsAction(baseUrl, action);
+    if (!supported) {
+      remainingUnsupported.push(action);
+    }
+  }
+
+  if (remainingUnsupported.length > 0) {
+    throw new Error(
+      `Sandbox runner still does not support required actions: ${remainingUnsupported.join(", ")}`
+    );
+  }
 }
 
 function extractPasswordFromDatabaseUrl(databaseUrl) {
@@ -814,8 +961,11 @@ export async function runLocalDevPreflight(options = {}) {
     runCommand("pnpm db:migrate", envFromFile);
   }
 
+  const sandboxRunnerBaseUrl = resolveSandboxRunnerBaseUrl(envFromFile);
   logStep("Waiting for sandbox runner health endpoint...");
-  await waitForHttpOk("http://localhost:3003/health");
+  await waitForHttpOk(`${sandboxRunnerBaseUrl}/health`);
+  logStep("Checking sandbox runner action support...");
+  await ensureSandboxRunnerActionSupport(envFile, envFromFile);
   logStep("Waiting for TON LSP readiness...");
   await waitForTonLspReady("http://localhost:3002/health");
 

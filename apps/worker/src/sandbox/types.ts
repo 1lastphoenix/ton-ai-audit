@@ -54,6 +54,7 @@ export type SandboxExecutionResponse = {
   workspaceId: string;
   mode: "local" | "docker";
   results: SandboxStepResult[];
+  unsupportedActions?: SandboxStepAction[];
 };
 
 export type SandboxProgressStep = {

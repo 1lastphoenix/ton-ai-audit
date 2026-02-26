@@ -460,7 +460,14 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
           });
 
           sandboxResults = execution.results;
+          const unsupportedActions = execution.unsupportedActions ?? [];
           const summary = summarizeSandboxResults(execution.results);
+          if (unsupportedActions.length > 0) {
+            workerLogger.warn("verify.stage.sandbox-unsupported-actions", {
+              ...context,
+              unsupportedActions
+            });
+          }
           for (const stepResult of execution.results) {
             const knownStep = liveProgressSteps.find((item) => item.id === stepResult.id);
             upsertLiveProgressStep({
@@ -472,15 +479,29 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
               durationMs: stepResult.durationMs
             });
           }
+          for (const step of liveProgressSteps) {
+            if (step.status === "pending") {
+              upsertLiveProgressStep({
+                ...step,
+                status: "skipped"
+              });
+            }
+          }
           const finalizedProgressSteps = snapshotLiveProgressSteps();
-          sandboxExecutionSummary = [
+          const sandboxExecutionSummaryParts = [
             `Sandbox mode: ${execution.mode}`,
             `Adapter: ${plan.adapter}`,
             `Completed: ${summary.completed}`,
             `Failed: ${summary.failed}`,
             `Skipped: ${summary.skipped}`,
             `Timeout: ${summary.timeout}`
-          ].join(" | ");
+          ];
+          if (unsupportedActions.length > 0) {
+            sandboxExecutionSummaryParts.push(
+              `Unsupported actions skipped: ${unsupportedActions.join(", ")}`
+            );
+          }
+          sandboxExecutionSummary = sandboxExecutionSummaryParts.join(" | ");
 
           workerLogger.info("verify.stage.sandbox-completed", {
             ...context,
@@ -488,7 +509,8 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
             sandboxCompleted: summary.completed,
             sandboxFailed: summary.failed,
             sandboxSkipped: summary.skipped,
-            sandboxTimeout: summary.timeout
+            sandboxTimeout: summary.timeout,
+            unsupportedActions
           });
           await recordJobEvent({
             projectId: job.data.projectId,
@@ -506,6 +528,7 @@ export function createVerifyProcessor(deps: { enqueueJob: EnqueueJob }) {
               failed: summary.failed,
               skipped: summary.skipped,
               timeout: summary.timeout,
+              unsupportedActions,
               steps: finalizedProgressSteps
             }
           });

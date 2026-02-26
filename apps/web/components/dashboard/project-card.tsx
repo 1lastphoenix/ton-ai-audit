@@ -25,6 +25,7 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
+import { isUuid } from "@/lib/uuid";
 
 const dayMs = 24 * 60 * 60 * 1_000;
 
@@ -67,8 +68,14 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const projectHref = isUuid(project.id) ? `/projects/${project.id}` : null;
 
   async function onDelete() {
+    if (!projectHref) {
+      setError("Project id is invalid. Refresh the dashboard and try again.");
+      return;
+    }
+
     setError(null);
     setIsDeleting(true);
     try {
@@ -94,7 +101,7 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
     return (
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive" size={buttonSize} disabled={isDeleting}>
+          <Button variant="destructive" size={buttonSize} disabled={isDeleting || !projectHref}>
             <Trash2 className="size-3.5" />
             {isDeleting ? "Deleting..." : "Delete"}
           </Button>
@@ -149,12 +156,19 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
           </div>
 
           <div className="flex w-full shrink-0 items-center gap-2 self-start md:w-auto md:self-center">
-            <Button asChild size="xs" className="gap-1.5">
-              <Link href={`/projects/${project.id}`}>
+            {projectHref ? (
+              <Button asChild size="xs" className="gap-1.5">
+                <Link href={projectHref}>
+                  Open
+                  <ExternalLink className="size-3.5" />
+                </Link>
+              </Button>
+            ) : (
+              <Button size="xs" className="gap-1.5" disabled>
                 Open
                 <ExternalLink className="size-3.5" />
-              </Link>
-            </Button>
+              </Button>
+            )}
             {renderDeleteAction("xs")}
           </div>
         </div>
@@ -190,12 +204,19 @@ export function ProjectCard({ project, variant = "grid" }: ProjectCardProps) {
       </CardContent>
 
       <CardFooter className="flex items-center justify-between gap-2 px-3 py-3 sm:px-4 sm:py-4">
-        <Button asChild size="sm" className="gap-1.5">
-          <Link href={`/projects/${project.id}`}>
+        {projectHref ? (
+          <Button asChild size="sm" className="gap-1.5">
+            <Link href={projectHref}>
+              Open
+              <ExternalLink className="size-3.5" />
+            </Link>
+          </Button>
+        ) : (
+          <Button size="sm" className="gap-1.5" disabled>
             Open
             <ExternalLink className="size-3.5" />
-          </Link>
-        </Button>
+          </Button>
+        )}
 
         {renderDeleteAction("sm")}
       </CardFooter>

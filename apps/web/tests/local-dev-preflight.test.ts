@@ -21,6 +21,7 @@ const preflight = require("../../../scripts/local-dev-preflight.mjs") as {
     }
   ) => Promise<void>;
   localComposeServices: string[];
+  requiredSandboxActions: string[];
   shouldStartLocalStack: (
     rows: Array<Record<string, string | undefined>>,
     requiredServices?: string[]
@@ -48,6 +49,7 @@ const {
   parseDotEnv,
   requiredEnvKeys,
   localComposeServices,
+  requiredSandboxActions,
   resetNextDevArtifacts,
   deriveDatabaseEnv
 } = preflight;
@@ -131,6 +133,12 @@ MINIO_BUCKET=ton-audit
     );
     expect(localComposeServices).not.toContain("web");
     expect(localComposeServices).not.toContain("worker");
+  });
+
+  it("requires sandbox security scan actions for compatibility checks", () => {
+    expect(requiredSandboxActions).toEqual(
+      expect.arrayContaining(["security-rules-scan", "security-surface-scan"])
+    );
   });
 
   it("forces NODE_ENV=production for build commands", () => {
